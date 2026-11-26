@@ -1,0 +1,22 @@
+# 运行数据（含业务数据、账号哈希、飞书 appSecret，严禁入库）
+data/
+*.db.json
+db.backup-*.json
+db.json
+
+# 依赖与日志
+node_modules/
+npm-debug.log*
+*.log
+
+# 本地环境与编辑器
+.env
+.env.*
+.DS_Store
+Thumbs.db
+.idea/
+.vscode/
+
+# 含真实业务数据的分析文档，禁止入库
+docs/
+

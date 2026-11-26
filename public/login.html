@@ -1,0 +1,72 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>登录 · 转介绍数据看板</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232563eb'/%3E%3Cpath d='M5 18V11M10 18V6M15 18v-5M20 18H4' stroke='white' stroke-width='2' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/assets/theme.css">
+</head>
+<body>
+<div class="auth">
+  <div class="auth-card">
+    <div class="auth-brand">
+      <span class="brand-mark">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
+      </span>
+      <div>
+        <div style="font-weight:650;font-size:13.5px">转介绍数据看板</div>
+        <div class="brand-sub">OPERATIONS CONSOLE</div>
+      </div>
+    </div>
+
+    <h1 class="auth-title">登录数据中台</h1>
+    <p class="auth-sub" id="authSub">管理员维护数据与账号，基地账号查看本基地看板</p>
+
+    <form class="auth-form" id="loginForm" autocomplete="on">
+      <div>
+        <label for="username">用户名</label>
+        <input class="control" id="username" name="username" autocomplete="username" placeholder="请输入账号" required>
+      </div>
+      <div>
+        <label for="password">密码</label>
+        <input class="control" id="password" name="password" type="password" autocomplete="current-password" placeholder="请输入密码" required>
+      </div>
+      <div id="authError" class="auth-error hidden"></div>
+      <button class="btn btn-primary btn-block" id="submitBtn" type="submit" style="height:40px;margin-top:2px">登录</button>
+    </form>
+  </div>
+</div>
+
+<script src="/assets/ui.js"></script>
+<script>
+  const form = $('#loginForm');
+  const err = $('#authError');
+
+  form.addEventListener('submit', async (e) => {
+    e.preventDefault();
+    err.classList.add('hidden');
+    const btn = $('#submitBtn');
+    btn.disabled = true;
+    btn.textContent = '登录中…';
+    try {
+      const r = await api('/api/login', {
+        method: 'POST',
+        body: { username: $('#username').value.trim(), password: $('#password').value }
+      });
+      location.href = r.user.role === 'admin' ? '/admin' : '/';
+    } catch (e2) {
+      err.textContent = e2.message;
+      err.classList.remove('hidden');
+      btn.disabled = false;
+      btn.textContent = '登录';
+    }
+  });
+
+  // 已登录直接跳转
+  api('/api/me').then((r) => {
+    if (r.user) location.href = r.user.role === 'admin' ? '/admin' : '/';
+  }).catch(() => {});
+</script>
+</body>
+</html>

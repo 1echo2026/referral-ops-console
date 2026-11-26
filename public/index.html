@@ -1,0 +1,73 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>转介绍数据看板</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232563eb'/%3E%3Cpath d='M5 18V11M10 18V6M15 18v-5M20 18H4' stroke='white' stroke-width='2' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/assets/theme.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
+      </span>
+      <span class="brand-text">
+        <span class="brand-name" id="brandName">转介绍数据看板</span>
+        <span class="brand-sub" id="brandSub">基地经营</span>
+      </span>
+    </a>
+    <nav class="site-nav" aria-label="主导航">
+      <a class="nav-link active" href="/">总览</a>
+      <a class="nav-link" href="/tables">专项明细</a>
+      <a class="nav-link" href="/rankings">业绩排行</a>
+      <a class="nav-link" href="/records">明细名单</a>
+    </nav>
+    <div class="header-user">
+      <span class="meta-chip" id="viewerChip">—</span>
+      <a class="header-action hidden" href="/admin" id="adminLink">后台管理</a>
+      <button class="header-action" id="logoutBtn" type="button">退出</button>
+    </div>
+  </div>
+</header>
+
+<main class="page">
+  <div class="alert hidden" id="announcement" style="align-items:center">
+    <svg viewBox="0 0 24 24" width="15" height="15" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M3 11v2a1 1 0 0 0 1 1h2l4 4h1V6h-1L6 10H4a1 1 0 0 0-1 1Z"/><path d="M15 8a5 5 0 0 1 0 8M18 5a9 9 0 0 1 0 14"/></svg>
+    <div id="announcementText"></div>
+  </div>
+
+  <div class="page-head">
+    <div>
+      <h1 class="page-title" id="pageTitle">转介绍总览</h1>
+      <p class="page-sub" id="pageSubtitle">基地经营 · 转介绍名单与转化</p>
+    </div>
+    <div class="head-meta">
+      <span class="meta-chip"><span class="dot"></span><span id="updatedAt">—</span></span>
+      <span class="meta-chip" id="versionChip">版本 —</span>
+    </div>
+  </div>
+
+  <div id="globalError" class="alert err hidden"></div>
+
+  <div id="boardHost"></div>
+
+  <div class="insight" id="caliberNote" style="margin-top:4px">
+    <span class="ic"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><circle cx="12" cy="12" r="9"/><path d="M12 11v5M12 8h.01"/></svg></span>
+    <div id="caliberText">数据加载中…</div>
+  </div>
+
+  <footer class="page-foot">
+    <div id="dataNote">—</div>
+    <div id="footFixed">转介绍数据看板 · 前台只读 · 数据更新请进入后台</div>
+  </footer>
+</main>
+
+<script src="/assets/ui.js"></script>
+<script src="/assets/board.js"></script>
+<script src="/assets/index.js"></script>
+</body>
+</html>

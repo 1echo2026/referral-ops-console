@@ -1,0 +1,115 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>明细名单 · 转介绍数据看板</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24'%3E%3Crect width='24' height='24' rx='6' fill='%232563eb'/%3E%3Cpath d='M5 18V11M10 18V6M15 18v-5M20 18H4' stroke='white' stroke-width='2' stroke-linecap='round' fill='none'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="/assets/theme.css">
+</head>
+<body>
+
+<header class="site-header">
+  <div class="header-inner">
+    <a class="brand" href="/">
+      <span class="brand-mark" aria-hidden="true">
+        <svg viewBox="0 0 24 24" fill="none" stroke="#fff" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"><path d="M4 19V10M10 19V5M16 19v-7M22 19H2"/></svg>
+      </span>
+      <span class="brand-text">
+        <span class="brand-name" id="brandName">转介绍数据看板</span>
+        <span class="brand-sub" id="brandSub">基地经营</span>
+      </span>
+    </a>
+    <nav class="site-nav" aria-label="主导航">
+      <a class="nav-link" href="/">总览</a>
+      <a class="nav-link" href="/tables">专项明细</a>
+      <a class="nav-link" href="/rankings">业绩排行</a>
+      <a class="nav-link active" href="/records">明细名单</a>
+    </nav>
+    <div class="header-user">
+      <span class="meta-chip" id="viewerChip">—</span>
+      <a class="header-action hidden" href="/admin" id="adminLink">后台管理</a>
+      <button class="header-action" id="logoutBtn" type="button">退出</button>
+    </div>
+  </div>
+</header>
+
+<main class="page">
+  <div class="page-head">
+    <div>
+      <h1 class="page-title">明细名单</h1>
+      <p class="page-sub" id="pageSubtitle">搜索、筛选并查看每一条名单明细；姓名与手机号已脱敏</p>
+    </div>
+    <div class="head-meta">
+      <span class="meta-chip"><span class="dot"></span><span id="updatedAt">—</span></span>
+    </div>
+  </div>
+
+  <div class="table-tabs" id="datasetTabs"></div>
+
+  <section class="card" id="listCard" style="overflow:hidden">
+    <div class="card-body" style="border-bottom:1px solid var(--line)">
+      <div class="records-toolbar" style="margin-bottom:0">
+        <div class="field" id="baseField">
+          <label>基地</label>
+          <select class="control" id="baseFilter"><option value="all">全部基地</option></select>
+        </div>
+        <div class="field">
+          <label>状态</label>
+          <select class="control" id="statusFilter"><option value="all">全部状态</option></select>
+        </div>
+        <div class="field">
+          <input class="control search" id="searchInput" type="search" placeholder="搜索姓名 / 手机 / 负责人">
+        </div>
+        <div class="spacer"></div>
+        <span class="records-summary" id="recordsSummary">—</span>
+        <button class="btn btn-sm" id="resetBtn" type="button">重置</button>
+        <button class="btn btn-sm" id="exportBtn" type="button">
+          <svg viewBox="0 0 24 24" width="13" height="13" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round"><path d="M12 4v12m0 0 4-4m-4 4-4-4"/><path d="M4 18v2h16v-2"/></svg>
+          导出脱敏 CSV
+        </button>
+      </div>
+    </div>
+    <div class="table-wrap" style="max-height:62vh">
+      <table class="table" id="recordsTable">
+        <thead></thead>
+        <tbody><tr><td><div class="skeleton sk-line"></div></td></tr></tbody>
+      </table>
+    </div>
+    <div class="table-footer">
+      <span id="pageInfo">—</span>
+      <div class="pager" id="pager"></div>
+    </div>
+  </section>
+
+  <section class="card hidden" id="uncvCard" style="overflow:hidden"></section>
+
+  <section class="card hidden" id="duncvCard" style="overflow:hidden"></section>
+  <section class="card hidden" id="chainCard" style="overflow:hidden"></section>
+  <section class="card hidden" id="ktierCard" style="overflow:hidden"></section>
+  <section class="card hidden" id="diamondCard" style="overflow:hidden"></section>
+  <section class="card hidden" id="dmdCard" style="overflow:hidden"></section>
+  <section class="card hidden" id="dragonCard" style="overflow:hidden"></section>
+
+  <footer class="page-foot">
+    <div>明细数据来源于已上传底表 · 前台只读 · 完整信息请进入后台查看</div>
+  </footer>
+</main>
+
+<div class="drawer-backdrop" id="drawerBackdrop">
+  <div class="drawer" id="drawer" role="dialog" aria-modal="true">
+    <div class="drawer-head">
+      <div>
+        <h2 class="drawer-title" id="drawerTitle">—</h2>
+        <p class="drawer-sub" id="drawerSub">—</p>
+      </div>
+      <button class="drawer-close" id="drawerClose" type="button" aria-label="关闭">✕</button>
+    </div>
+    <div class="drawer-body" id="drawerBody"></div>
+  </div>
+</div>
+
+<script src="/assets/ui.js"></script>
+<script src="/assets/records.js"></script>
+</body>
+</html>

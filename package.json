@@ -1,0 +1,14 @@
+{
+  "name": "referral-ops-console",
+  "version": "1.0.0",
+  "private": true,
+  "description": "转介绍数据看板 · 运营中台（底表上传 / 取数逻辑 / 销售架构 / 目标 / 数据看板）",
+  "main": "server.js",
+  "scripts": {
+    "start": "node server.js",
+    "reset": "node -e \"require('fs').rmSync('data/db.json',{force:true});console.log('已清除演示数据，下次启动会重新生成')\""
+  },
+  "engines": {
+    "node": ">=18"
+  }
+}
