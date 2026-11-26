@@ -314,7 +314,7 @@ function writeUrl() {
   if (Rec.q) p.set('q', Rec.q);
   if (Rec.from) p.set('from', Rec.from);
   if (Rec.to) p.set('to', Rec.to);
-  history.replaceState(null, '', p.toString() ? `/records?${p.toString()}` : '/records');
+  history.replaceState(null, '', p.toString() ? `records.html?${p.toString()}` : 'records.html');
 }
 
 async function load() {
