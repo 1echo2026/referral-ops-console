@@ -81,7 +81,7 @@
       if (clean === '/api/logout') return jres({ ok: true });
       return jres({ error: '演示环境为只读快照，不支持修改操作' }, 400);
     }
-    if (clean === '/api/me') return jres({ error: '未登录' }, 401);
+    if (clean === '/api/me') return jres({ user: null });
     if (clean === '/api/bootstrap') return file('bootstrap.json').then(function (d) { return jres(d || { error: '快照缺失' }); });
     if (clean === '/api/meta') return file('meta.json').then(function (d) { return jres(d || {}); });
     if (clean.indexOf('/api/dashboard') === 0) {
