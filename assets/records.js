@@ -326,7 +326,7 @@ function writeUrl() {
   if (Rec.q) p.set('q', Rec.q);
   if (Rec.from) p.set('from', Rec.from);
   if (Rec.to) p.set('to', Rec.to);
-  history.replaceState(null, '', p.toString() ? `/records?${p.toString()}` : '/records');
+  history.replaceState(null, '', p.toString() ? `records.html?${p.toString()}` : 'records.html');
 }
 
 async function load() {
@@ -2197,7 +2197,7 @@ function renderGjteam() {
   $('#pageSubtitle').textContent = '高经团队业绩 · 双口径数透：销售直推业绩（有数完成度）＋ 接leads业绩（转化跟踪已转化单）；高经业绩 = 手下经理业绩 + 本人在经理层的业绩；归属映射仅管理员可调整';
 
   if (!baseNames.length) {
-    card.innerHTML = '<div class="card-body"><div class="empty"><h3>暂无数据</h3><p>' + esc(d.demoNote || '有数完成度或转化跟踪底表未上传') + '</p></div></div>';
+    card.innerHTML = '<div class="card-body"><div class="empty"><h3>暂无数据</h3><p>' + esc(d.demoNote || '有数完成度或转介绍转化跟踪底表未上传') + '</p></div></div>';
     return;
   }
 
