@@ -110,7 +110,7 @@ function toneBadge(tone) {
 }
 
 /* ---------------------------------------------------------------- 数据底表 */
-/** 8 个固定上传窗口覆盖的底表（不再出现在「更多底表」区） */
+/** 固定上传窗口覆盖的底表（不再出现在「更多底表」区）；质检台账已从展示中下线（数据保留，链路不受影响） */
 const FIXED_WINDOW_IDS = ['ds_youshu', 'ds_qc', 'ds_direct', 'ds_high', 'ds_diamond', 'ds_deal'];
 
 function renderDatasets() {
@@ -131,12 +131,12 @@ function renderDatasets() {
   const segStat = (st) => (st
     ? `<span>已写入 <b>${fmtInt(st.rows)}</b> 行</span><span>更新 <b>${esc((st.at || '—').slice(5))}</b></span>`
     : '<span>未上传</span>');
-  const winCard = (no, tone, ic, title, desc, stat, actions) => `
+  const winCard = (no, tone, ic, title, desc, stat, actions, badge) => `
     <article class="ds-card" data-tone="${tone}">
       <div class="ds-top">
         <div class="ds-ic">${icon(ic, 17)}</div>
         <div class="grow">
-          <div class="ds-name"><span class="badge plain">窗口 ${no}</span> ${esc(title)}</div>
+          <div class="ds-name"><span class="badge plain">窗口 ${no}</span> ${esc(title)} ${badge || ''}</div>
           <div class="ds-desc">${esc(desc)}</div>
         </div>
       </div>
@@ -147,25 +147,57 @@ function renderDatasets() {
     </article>`;
   const upBtn = (wds) => `<button class="btn btn-sm" data-wact="upload" data-wds="${wds}" type="button">${icon('upload', 12)}上传</button>`;
   const logicBtn = (wds) => `<button class="btn btn-sm btn-soft" data-wact="logic" data-wds="${wds}" type="button">${icon('sliders', 12)}取数逻辑</button>`;
+  const segUp = (seg) => `<button class="btn btn-sm" data-wact="seg" data-wseg="${seg}" type="button">${icon('upload', 12)}上传</button>`;
+  const refBadge = '<span class="ds-ref-badge">引用</span>';
 
   $('#view-datasets').innerHTML = `
     <div class="alert">
       ${icon('info', 15)}
-      <div><b>8 个上传窗口</b>对应计算链路的数据源，各自独立上传互不影响。计算时直接引用这里上传的数据：有数业绩完成度 → 一线直推业绩排名 / 团队完成度 / 龙珠奖；leads分配表 + 哥伦布订单池 → 接例子链路（已转化 / 未转化 / 完成度）；转介绍转化跟踪 → 直推未转化 / 钻石未使用；高潜名单 → KOC 三类分层；月目标表 → 完成度与榜 D/E。</div>
+      <div><b>7 个上传窗口</b>按用途分为三个板块：<b>业绩</b>（有数业绩完成度 / leads分配表 / 哥伦布订单池 / 月目标表）→ 一线直推业绩排名 / 团队完成度 / 完成度榜 D-E；<b>转化表</b>（接leads转化 / 直推转化）→ 接例子链路与直推未转化；<b>koc 与钻石发放明细</b> → KOC 三类分层 / 钻石未使用名单。同一底表可在多个板块引用（标记「引用」），数据仍是同一份，上传互不影响。</div>
     </div>
-    <div class="ds-grid">
-      ${winCard(1, 'green', 'wallet', '有数业绩完成度', '按「工号」数透转化金额，保留基地/姓名/工号 → 一线直推业绩表（工号、基地、直推业绩、当月名次）', dsStat('ds_youshu'), upBtn('ds_youshu') + logicBtn('ds_youshu'))}
-      ${winCard(2, 'amber', 'phone', '质检台账', '当期触发质检的人取消一切奖励（龙珠奖前置净化）', dsStat('ds_qc'), upBtn('ds_qc') + logicBtn('ds_qc'))}
-      ${winCard(3, 'blue', 'userPlus', 'leads分配表（剔除无效与私发）', '有效例子 = 分配表剔除无效 / 不分配（手动上传剔除规则）· 接例子链路左表', segStat(segs.leads), `<button class="btn btn-sm" data-wact="seg" data-wseg="leads" type="button">${icon('upload', 12)}上传</button>`)}
-      ${winCard(4, 'blue', 'database', '哥伦布订单池', '订单明细（用户ID / CCid / 转化金额 / 订单状态）· 按用户ID数透后与 leads 左连接判转化', segStat(segs.orders), `<button class="btn btn-sm" data-wact="seg" data-wseg="orders" type="button">${icon('upload', 12)}上传</button>`)}
-      ${winCard(5, 'violet', 'userPlus', '转介绍转化跟踪', '直推链路 a-b-c 绑定关系与转化金额 · 直推未转化 / 龙珠奖净营收底表', dsStat('ds_direct'), upBtn('ds_direct') + logicBtn('ds_direct'))}
-      ${winCard(6, 'violet', 'spark', '高潜名单', '沿用目前上传形式（历史累计 + 26年两段）· KOC 三类分层与高潜总池', dsStat('ds_high'), upBtn('ds_high') + logicBtn('ds_high'))}
-      ${winCard(7, 'violet', 'spark', '钻石商城财务报表', '钻石发放与消耗流水 · 匹配已转化老用户 → 未使用名单（解冻：正价课满 30 天未退）', dsStat('ds_diamond'), upBtn('ds_diamond') + logicBtn('ds_diamond'))}
-      ${winCard(8, 'amber', 'wallet', '月目标表', '两个目标上传窗口（沿用现有方式）：高经团队目标 / 经理团队目标 · 用于直推完成度与龙珠奖榜 D/E',
-      `<span>高经目标 <b>${segs.targetDirectGj ? fmtInt(segs.targetDirectGj.rows) : 0}</b> 行 · 经理目标 <b>${segs.targetDirectJl ? fmtInt(segs.targetDirectJl.rows) : 0}</b> 行</span>`,
-      `<button class="btn btn-sm" data-wact="tgt" data-wseg="targetDirectGj" type="button">${icon('upload', 12)}高经团队目标</button>
-       <button class="btn btn-sm" data-wact="tgt" data-wseg="targetDirectJl" type="button">${icon('upload', 12)}经理团队目标</button>`)}
-    </div>
+
+    <section class="ds-section blue">
+      <div class="ds-sec-head"><span class="ds-sec-dot"></span><span class="ds-sec-title">业绩</span><span class="ds-sec-sub">4 个窗口 · 一线直推业绩排名 / 团队完成度 / 龙珠奖 / 榜 D-E</span></div>
+      <div class="ds-grid">
+        ${winCard(1, 'green', 'wallet', '有数业绩完成度', '按「工号」数透转化金额，保留基地/姓名/工号 → 一线直推业绩表（工号、基地、直推业绩、当月名次）', dsStat('ds_youshu'), upBtn('ds_youshu') + logicBtn('ds_youshu'))}
+        ${winCard(2, 'blue', 'userPlus', 'leads分配表（剔除无效与私发）', '有效例子 = 分配表剔除无效 / 不分配（手动上传剔除规则）· 接例子链路左表', segStat(segs.leads), segUp('leads') + logicBtn('ds_deal'))}
+        ${winCard(3, 'blue', 'database', '哥伦布订单池', '订单明细（用户ID / CCid / 转化金额 / 订单状态）· 按用户ID数透后与 leads 左连接判转化', segStat(segs.orders), segUp('orders') + logicBtn('ds_deal'))}
+        ${winCard(4, 'amber', 'wallet', '月目标表', '两个目标上传窗口（沿用现有方式）：高经团队目标 / 经理团队目标 · 用于直推完成度与龙珠奖榜 D/E',
+        `<span>高经目标 <b>${segs.targetDirectGj ? fmtInt(segs.targetDirectGj.rows) : 0}</b> 行 · 经理目标 <b>${segs.targetDirectJl ? fmtInt(segs.targetDirectJl.rows) : 0}</b> 行</span>`,
+        `<button class="btn btn-sm" data-wact="tgt" data-wseg="targetDirectGj" type="button">${icon('upload', 12)}高经团队目标</button>
+         <button class="btn btn-sm" data-wact="tgt" data-wseg="targetDirectJl" type="button">${icon('upload', 12)}经理团队目标</button>`)}
+      </div>
+    </section>
+
+    <section class="ds-section amber">
+      <div class="ds-sec-head"><span class="ds-sec-dot"></span><span class="ds-sec-title">转化表</span><span class="ds-sec-sub">2 个小板块 · 接leads转化 / 直推转化</span></div>
+      <div class="ds-subgrid">
+        <div class="ds-subgroup">
+          <div class="ds-sub-title">接leads转化</div>
+          ${winCard(2, 'blue', 'userPlus', 'leads分配表（剔除无效与私发）', '有效例子 = 分配表剔除无效 / 不分配 · 接例子链路左表', segStat(segs.leads), segUp('leads') + logicBtn('ds_deal'), refBadge)}
+          ${winCard(3, 'blue', 'database', '哥伦布订单池', '订单明细按用户ID数透后与 leads 左连接判转化', segStat(segs.orders), segUp('orders') + logicBtn('ds_deal'), refBadge)}
+        </div>
+        <div class="ds-subgroup">
+          <div class="ds-sub-title">直推转化</div>
+          ${winCard(5, 'violet', 'userPlus', '转介绍转化跟踪', '直推链路 a-b-c 绑定关系与转化金额 · 直推未转化 / 龙珠奖净营收底表', dsStat('ds_direct'), upBtn('ds_direct') + logicBtn('ds_direct'))}
+        </div>
+      </div>
+    </section>
+
+    <section class="ds-section red">
+      <div class="ds-sec-head"><span class="ds-sec-dot"></span><span class="ds-sec-title">koc 与钻石发放明细</span><span class="ds-sec-sub">2 个小板块 · koc / 钻石发放明细</span></div>
+      <div class="ds-subgrid">
+        <div class="ds-subgroup">
+          <div class="ds-sub-title">koc</div>
+          ${winCard(6, 'violet', 'spark', '高潜名单', '沿用目前上传形式（历史累计 + 26年两段）· KOC 三类分层与高潜总池', dsStat('ds_high'), upBtn('ds_high') + logicBtn('ds_high'))}
+        </div>
+        <div class="ds-subgroup">
+          <div class="ds-sub-title">钻石发放明细</div>
+          ${winCard(7, 'violet', 'spark', '钻石商城财务报表', '钻石发放与消耗流水 · 匹配已转化老用户 → 未使用名单（解冻：正价课满 30 天未退）', dsStat('ds_diamond'), upBtn('ds_diamond') + logicBtn('ds_diamond'))}
+          ${winCard(6, 'violet', 'spark', '高潜名单', 'KOC 三类分层与高潜总池（与 koc 板块同一份数据）', dsStat('ds_high'), upBtn('ds_high') + logicBtn('ds_high'), refBadge)}
+        </div>
+      </div>
+    </section>
 
     <section class="card mt-16">
       <div class="card-head">

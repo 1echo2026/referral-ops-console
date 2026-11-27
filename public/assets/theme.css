@@ -463,6 +463,27 @@ table.table { width: 100%; border-collapse: collapse; }
 }
 .ds-meta b { color: var(--text); font-weight: 600; font-variant-numeric: tabular-nums; }
 .ds-actions { display: flex; gap: 6px; margin-left: auto; }
+.ds-actions .btn { border-radius: 10px; }
+
+/* 数据底表三板块（业绩 / 转化表 / koc与钻石发放明细） */
+.ds-section { border-radius: 14px; padding: 16px 18px 18px; margin-bottom: 14px; border: 1px solid; }
+.ds-section.blue  { background: var(--primary-soft);  border-color: #bfdbfe; }
+.ds-section.amber { background: var(--warning-soft); border-color: #fde68a; }
+.ds-section.red   { background: var(--danger-soft);  border-color: #fecaca; }
+.ds-sec-head { display: flex; align-items: baseline; gap: 8px; margin-bottom: 12px; flex-wrap: wrap; }
+.ds-sec-dot { width: 9px; height: 9px; border-radius: 3px; align-self: center; flex: none; }
+.ds-section.blue .ds-sec-dot { background: var(--primary); }
+.ds-section.amber .ds-sec-dot { background: var(--warning); }
+.ds-section.red .ds-sec-dot { background: var(--danger); }
+.ds-sec-title { font-size: 14px; font-weight: 600; color: var(--ink); }
+.ds-sec-sub { font-size: 11px; color: var(--text-3); }
+.ds-subgrid { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 12px; align-items: start; }
+.ds-subgroup { background: #fff; border: 1px solid rgba(15, 23, 42, .07); border-radius: 12px; padding: 12px 14px 13px; }
+.ds-sub-title { font-size: 13px; font-weight: 600; color: var(--ink); margin-bottom: 9px; display: flex; align-items: center; gap: 7px; }
+.ds-subgroup .ds-card { cursor: default; box-shadow: none; }
+.ds-subgroup .ds-card:hover { transform: none; box-shadow: none; border-color: var(--line); }
+.ds-subgroup .ds-card + .ds-card { margin-top: 10px; }
+.ds-ref-badge { font-size: 10px; font-weight: 500; padding: 1px 7px; border-radius: 5px; background: var(--surface-soft); color: var(--text-3); border: 1px solid var(--line); }
 
 /* ---------------------------------------------------------------- 上传 */
 .steps { display: flex; gap: 8px; margin-bottom: 16px; }
@@ -1183,6 +1204,7 @@ table.table { width: 100%; border-collapse: collapse; }
 }
 @media (max-width: 1080px) {
   .ds-grid { grid-template-columns: 1fr; }
+  .ds-subgrid { grid-template-columns: 1fr; }
   .grid-2, .grid-2.equal, .grid-3 { grid-template-columns: 1fr; }
   .pipe { flex-wrap: wrap; }
   .pipe-step { flex: 1 1 44%; }
