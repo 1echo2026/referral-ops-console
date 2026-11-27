@@ -49,6 +49,47 @@ const COLS = {
   activity: { date: '触达日期', base: '基地', empId: '工号', name: '姓名', phone: '客户手机号', channel: '触达方式', status: '触达结果' }
 };
 
+/* ---------- 演示扩展：有数业绩完成度 / 钻石商城财务报表（合成数据） ---------- */
+const EXTRA_DEFS = [
+  {
+    id: 'ds_youshu', key: 'youshu', name: '有数业绩完成度', preset: 'perf', category: '业绩类',
+    desc: '有数系统导出的一线业绩明细：按工号累计转化金额，用于一线直推业绩排名、团队完成度与龙珠奖。',
+    icon: 'wallet', tone: 'green',
+    columns: ['下单时间', '基地', '工号', '销售姓名', '高经', '经理', '销售直推业绩', '退款'],
+    standardFields: [
+      { key: 'date', label: '下单时间', type: 'date', required: true },
+      { key: 'base', label: '基地', type: 'text', required: false },
+      { key: 'empId', label: '工号', type: 'text', required: true },
+      { key: 'empName', label: '销售姓名', type: 'text', required: false },
+      { key: 'amount', label: '销售直推业绩', type: 'number', required: true },
+      { key: 'refund', label: '退款', type: 'number', required: false }
+    ],
+    mapping: { date: '下单时间', base: '基地', empId: '工号', empName: '销售姓名', amount: '销售直推业绩' },
+    caliber: '按工号数透销售直推业绩；退款列存在时净营收 = 业绩 − 退款。',
+    metrics: [
+      { key: 'list', name: '订单数', type: 'count', field: '', filter: null, unit: '单', format: 'int', scope: 'base', desc: '底表行数' },
+      { key: 'amount', name: '转化金额', type: 'sum', field: 'amount', filter: null, unit: '元', format: 'money', scope: 'base', desc: '销售直推业绩求和' }
+    ]
+  },
+  {
+    id: 'ds_diamond', key: 'diamond', name: '钻石商城财务报表', preset: '', category: '业绩类',
+    desc: '钻石发放与消耗流水：匹配已转化老用户，用于钻石未使用名单与兑换明细。',
+    icon: 'spark', tone: 'violet',
+    columns: ['用户id', '钻石消耗/发放', '钻石数量', '钻石消耗/发放原因', '消耗/发放时间', '唯一id（包括兑换商品id）', '订单情况'],
+    standardFields: [
+      { key: 'userId', label: '用户ID', type: 'text', required: true, aliases: ['用户id', '老用户ID'] },
+      { key: 'type', label: '类型', type: 'text', required: false, aliases: ['钻石消耗/发放'] },
+      { key: 'diamonds', label: '钻石数量', type: 'number', required: false },
+      { key: 'date', label: '时间', type: 'text', required: false, aliases: ['消耗/发放时间'] }
+    ],
+    mapping: {},
+    caliber: '发放/消耗流水按用户ID聚合；发放原因=邀请平台新用户报名正价课对应转介绍奖励。',
+    metrics: [
+      { key: 'list', name: '流水数', type: 'count', field: '', filter: null, unit: '笔', format: 'int', scope: 'base', desc: '底表行数' }
+    ]
+  }
+];
+
 function buildEmployees(rand) {
   const list = [];
   let seq = 1001;
@@ -256,6 +297,164 @@ function buildDatasetRows(rand, kind, employees, baseMap) {
   return rows;
 }
 
+/* ---------- 演示扩展：a-b-c 绑定 / KOC 列 / 业绩表 / 钻石流水 / 团队目标段 ---------- */
+function enrichDirectRows(rand, rows, employees) {
+  const empMap = {};
+  employees.forEach((e) => { empMap[e.empId] = e; });
+  const phoneMap = new Map();
+  let seq = 7000;
+  rows.forEach((r) => {
+    const e = empMap[r['工号']] || {};
+    if (!phoneMap.has(r['手机号'])) phoneMap.set(r['手机号'], { b: `urs-demo${seq}@163.com`, c: `urs-demo${seq}@163.com` });
+    seq += 1;
+    const ids = phoneMap.get(r['手机号']);
+    r['b'] = ids.b;
+    r['c'] = ids.c;
+    r['转化userid'] = ids.c;
+    r['a'] = `demo-a${e.managerId || e.empId || 'x'}`;
+    r['高经'] = e.managerName || '';
+    r['经理'] = e.teamName || '';
+    r['主管'] = '';
+    r['组长'] = '';
+    if (r['跟进状态'] === '已转化') {
+      r['转化金额'] = Math.round((3200 + rand() * 26000) / 100) * 100;
+      r['转化日期'] = r['日期'];
+      r['转化时间'] = `${r['日期']}T${pad(Math.floor(rand() * 24))}:${pad(Math.floor(rand() * 60))}:00`;
+      r['转介绍日期'] = r['日期'];
+      r['转介绍系统'] = '哥伦布';
+      r['订单行数'] = 1;
+      r['转化订单ID'] = `DEMO${seq}`;
+    } else {
+      r['转化金额'] = '';
+      r['转介绍日期'] = r['日期'];
+    }
+  });
+  return phoneMap;
+}
+
+function enrichHighRows(rand, rows) {
+  rows.forEach((r, i) => {
+    r['老用户ID'] = `urs-demo${5000 + i}@163.com`;
+    r['26年新体验用户数量'] = Math.floor(rand() * 3);
+    r['26年新正价用户数量'] = rand() < 0.35 ? Math.floor(rand() * 3) : 0;
+    r['累计新体验用户数量'] = Math.floor(rand() * 10);
+    const x = rand();
+    r['累计新正价用户数量'] = x < 0.08 ? 6 + Math.floor(rand() * 6) : x < 0.38 ? 3 + Math.floor(rand() * 3) : Math.floor(rand() * 3);
+    r['累计金额'] = r['累计新正价用户数量'] * 8000 + Math.floor(rand() * 5000);
+  });
+}
+
+function buildYoushuRows(rand, employees, baseMap, phoneMap) {
+  const rows = [];
+  const months = ['2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11'];
+  const cList = [...phoneMap.values()].map((v) => v.c);
+  let rowNo = 0;
+  months.forEach((m, mi) => {
+    const ramp = 0.78 + mi * 0.05;
+    employees.forEach((e, idx) => {
+      const skill = 0.62 + ((idx * 37) % 11) / 13;
+      const n = Math.floor(rand() * 5) + (rand() < skill * ramp ? 1 : 0);
+      for (let k = 0; k < n; k += 1) {
+        const day = 1 + Math.floor(rand() * 28);
+        rows.push({
+          _rowNo: (rowNo += 1),
+          '下单时间': `${m}-${String(day).padStart(2, '0')}`,
+          '基地': baseMap[e.baseId].name,
+          '工号': e.empId,
+          '销售姓名': e.name,
+          '高经': e.managerName,
+          '经理': e.teamName,
+          '销售直推业绩': Math.round((2800 + rand() * 32000) / 100) * 100,
+          '退款': rand() < 0.08 ? Math.round((200 + rand() * 2400) / 100) * 100 : '',
+          'c': rand() < 0.5 ? cList[Math.floor(rand() * cList.length)] : ''
+        });
+      }
+    });
+  });
+  return rows;
+}
+
+function buildDiamondRows(rand, phoneMap, directRows) {
+  const converted = new Set();
+  directRows.forEach((r) => { if (r['跟进状态'] === '已转化' && Number(r['转化金额']) > 0) converted.add(r['b']); });
+  const rows = [];
+  let seq = 90000;
+  phoneMap.forEach((ids, phone) => {
+    const grantDate = `2026-0${6 + Math.floor(rand() * 6)}-${String(1 + Math.floor(rand() * 28)).padStart(2, '0')}`;
+    rows.push({
+      _rowNo: rows.length + 1,
+      '用户id': ids.b,
+      '钻石消耗/发放': '发放',
+      '钻石数量': 50000,
+      '钻石消耗/发放原因': '邀请平台新用户报名正价课',
+      '消耗/发放时间': grantDate,
+      '唯一id（包括兑换商品id）': `inviteOrder:${ids.c}`,
+      '订单情况': ''
+    });
+    if (converted.has(ids.b)) {
+      const n = rand() < 0.6 ? 1 + Math.floor(rand() * 3) : 0;
+      for (let k = 0; k < n; k += 1) {
+        rows.push({
+          _rowNo: rows.length + 1,
+          '用户id': ids.b,
+          '钻石消耗/发放': '消耗',
+          '钻石数量': Math.round((1000 + rand() * 18000) / 100) * 100,
+          '钻石消耗/发放原因': '兑换商品',
+          '消耗/发放时间': grantDate,
+          '唯一id（包括兑换商品id）': `redeem:${seq++}`,
+          '订单情况': '已完成'
+        });
+      }
+    }
+  });
+  return rows;
+}
+
+function buildPerfTargetSegs(rand, employees) {
+  const months = ['2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11'];
+  const mk = (names) => months.flatMap((m) => names.map((n) => ({ month: m, name: n, target: Math.round((60000 + rand() * 60000) / 100) * 100 })));
+  return {
+    gj: mk([...new Set(employees.map((e) => e.managerName))]),
+    jl: mk([...new Set(employees.map((e) => e.teamName))])
+  };
+}
+
+/* 接例子链路段：leads 分配表 + 订单池 + 接例子目标（合成） */
+function buildUncvSegs(rand, employees, phoneMap) {
+  const months = ['2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11'];
+  const leads = [];
+  const orders = [];
+  let seq = 30000;
+  phoneMap.forEach((ids) => {
+    const e = employees[Math.floor(rand() * employees.length)];
+    const m = months[Math.floor(rand() * months.length)];
+    const st = rand() < 0.08 ? '无效' : rand() < 0.05 ? '不分配' : '';
+    leads.push({
+      _rowNo: leads.length + 1,
+      userId: ids.c,
+      month: m,
+      time: `${m}-${String(1 + Math.floor(rand() * 28)).padStart(2, '0')}`,
+      base: '',
+      ccId: e.name,
+      empId: e.empId,
+      status: st
+    });
+    if (!st && rand() < 0.42) {
+      orders.push({
+        _rowNo: orders.length + 1,
+        userId: ids.c,
+        ccId: e.name,
+        amount: Math.round((3200 + rand() * 26000) / 100) * 100,
+        status: rand() < 0.05 ? '完全退款' : '',
+        month: m,
+        base: ''
+      });
+    }
+    seq += 1;
+  });
+  return { leads, orders };
+}
+
 /** 根据底表实际数据反推目标，保证达成率落在 88% ~ 118% 的合理区间 */
 function buildTargets(rand, rows, employees, baseMap) {
   const months = ['2026-06', '2026-07', '2026-08', '2026-09', '2026-10', '2026-11'];
@@ -342,6 +541,24 @@ function buildSeed() {
   DATASET_DEFS.forEach((ds) => {
     rows[ds.id] = buildDatasetRows(rand, ds.key, employees, baseMap);
   });
+  const phoneMap = enrichDirectRows(rand, rows.ds_direct, employees);
+  enrichHighRows(rand, rows.ds_high);
+  rows.ds_youshu = buildYoushuRows(rand, employees, baseMap, phoneMap);
+  rows.ds_diamond = buildDiamondRows(rand, phoneMap, rows.ds_direct);
+  const segs = buildPerfTargetSegs(rand, employees);
+  // 段同时挂在 ds_deal（龙珠奖读取）与 ds_youshu（rankings 取数按 perf 数据集 id 读段）
+  ['targetDirectGj', 'targetDirectJl', 'targetLeads'].forEach((k) => { rows[`ds_deal:${k}`] = []; rows[`ds_youshu:${k}`] = []; });
+  rows['ds_deal:targetDirectGj'] = segs.gj;
+  rows['ds_deal:targetDirectJl'] = segs.jl;
+  rows['ds_deal:targetLeads'] = segs.gj.map((t) => ({ month: t.month, name: t.name, target: Math.round(t.target * 0.6 / 100) * 100 }));
+  rows['ds_youshu:targetDirectGj'] = segs.gj;
+  rows['ds_youshu:targetDirectJl'] = segs.jl;
+  rows['ds_youshu:targetLeads'] = rows['ds_deal:targetLeads'];
+  const uncvSegs = buildUncvSegs(rand, employees, phoneMap);
+  rows['ds_deal:leads'] = uncvSegs.leads;
+  rows['ds_deal:orders'] = uncvSegs.orders;
+  rows['ds_youshu:leads'] = uncvSegs.leads;
+  rows['ds_youshu:orders'] = uncvSegs.orders;
 
   const accounts = [
     {
@@ -359,8 +576,8 @@ function buildSeed() {
     });
   });
 
-  const datasets = DATASET_DEFS.map((ds) => {
-    const r = rows[ds.id];
+  const datasets = [...DATASET_DEFS, ...EXTRA_DEFS].map((ds) => {
+    const r = rows[ds.id] || [];
     return {
       ...ds,
       dimensions: ['base', 'manager', 'team', 'month', 'status', 'empId'],

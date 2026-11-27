@@ -153,6 +153,14 @@ function initDefaults() {
   db.bases.forEach((b) => { if (!b.status) b.status = 'active'; });
   if (!Array.isArray(db.tutor)) db.tutor = [];
   if (!db.followups || typeof db.followups !== 'object' || Array.isArray(db.followups)) db.followups = {};
+  // 高经团队归属配置：selections=经理勾选映射（按高经持久化），nullRules=经理列 null 的归属规则（按数据源分开）
+  if (!db.gjTeam || typeof db.gjTeam !== 'object') db.gjTeam = {};
+  if (!db.gjTeam.selections || typeof db.gjTeam.selections !== 'object') db.gjTeam.selections = {};
+  if (!Array.isArray(db.gjTeam.nullRules)) {
+    db.gjTeam.nullRules = [
+      { id: 'nr_seed_hf_ys', source: 'ys', base: '合肥', targetName: '李杰', targetEmpId: 'H24738', enabled: true, by: '预置', at: '', note: '直推业绩：合肥经理列=null 归李杰' }
+    ];
+  }
   ensureWindowDatasets();
   if (!fs.existsSync(VERSIONS_DIR)) fs.mkdirSync(VERSIONS_DIR, { recursive: true });
   // 首次启动：发布初始版本，便于前台显示版本号
@@ -1202,6 +1210,176 @@ function abcChainSummary(rows) {
 }
 
 /* =========================================================================
+   2.9 高经团队业绩（双口径数透）
+   口径一：销售直推业绩（有数完成度 ds_youshu「销售直推业绩」列）
+   口径二：接 leads 业绩（转介绍转化跟踪 ds_direct「转化金额」>0 已转化单）
+   归属：经理列有效 → 归该经理；经理列 null/空 → 按 nullRules（管理员维护，按源分开）
+   高经业绩 = Σ 勾选经理业绩 + 本人在经理层的业绩（经理列=本人 或 null 规则命中）
+   勾选映射按高经持久化（db.gjTeam.selections），仅管理员可调整
+   ========================================================================= */
+function gjTeamEmpIndex() {
+  const g = (r, k) => String(r[k] == null ? '' : r[k]).trim();
+  const baseNameOf = (id) => {
+    const b = db.bases.find((x) => x.id === id);
+    return b ? String(b.name).replace(/基地$/, '') : String(id || '');
+  };
+  const idx = new Map();
+  const amb = new Set();
+  db.org.forEach((r) => {
+    if (!r || !g(r, 'name')) return;
+    const key = g(r, 'name') + '|' + baseNameOf(r.baseId);
+    if (!idx.has(key)) idx.set(key, g(r, 'empId'));
+    else if (idx.get(key) !== g(r, 'empId')) amb.add(key);
+  });
+  return { idx, amb, baseNameOf };
+}
+
+function buildGjTeam() {
+  const g = (r, k) => String(r[k] == null ? '' : r[k]).trim();
+  const num = (v) => Number(String(v == null ? '' : v).replace(/,/g, '')) || 0;
+  const ys = db.rows.ds_youshu || [];
+  const dc = db.rows.ds_direct || [];
+  const { idx: empIdx, amb: empAmb, baseNameOf } = gjTeamEmpIndex();
+
+  // 按基地聚合经理双口径实绩 + null/脏值桶
+  const bases = {};
+  const ensure = (b) => bases[b] || (bases[b] = {
+    mgrs: {},
+    ysNull: { n: 0, amt: 0, gj: {} },
+    dcNull: { n: 0, amt: 0, gj: {} },
+    dirty: { n: 0, amt: 0 }
+  });
+  const baseKeyOf = (v) => v || '(未填基地)';
+  ys.forEach((r) => {
+    if (!r || typeof r !== 'object') return;
+    const st = ensure(baseKeyOf(g(r, '基地')));
+    const m = g(r, '经理');
+    if (m && m !== 'null' && m !== '/') {
+      const o = st.mgrs[m] || (st.mgrs[m] = { ys: { n: 0, amt: 0 }, dc: { n: 0, amt: 0 } });
+      o.ys.n += 1; o.ys.amt += num(r['销售直推业绩']);
+    } else if (m === '/') {
+      st.dirty.n += 1; st.dirty.amt += num(r['销售直推业绩']);
+    } else {
+      st.ysNull.n += 1; st.ysNull.amt += num(r['销售直推业绩']);
+      const gj = g(r, '高经');
+      if (gj && gj !== 'null') st.ysNull.gj[gj] = (st.ysNull.gj[gj] || 0) + 1;
+    }
+  });
+  dc.forEach((r) => {
+    if (!r || typeof r !== 'object') return;
+    const amt = num(r['转化金额']);
+    if (amt <= 0) return;
+    const st = ensure(baseKeyOf(g(r, '基地')));
+    const m = g(r, '经理');
+    if (m && m !== 'null' && m !== '/') {
+      const o = st.mgrs[m] || (st.mgrs[m] = { ys: { n: 0, amt: 0 }, dc: { n: 0, amt: 0 } });
+      o.dc.n += 1; o.dc.amt += amt;
+    } else if (m === '/') {
+      st.dirty.n += 1; st.dirty.amt += amt;
+    } else {
+      st.dcNull.n += 1; st.dcNull.amt += amt;
+      const gj = g(r, '高经');
+      if (gj && gj !== 'null') st.dcNull.gj[gj] = (st.dcNull.gj[gj] || 0) + 1;
+    }
+  });
+
+  // 高经名单：两源底表高经列 distinct（org 表 level 列存在大量脏数据，不作为名单来源）
+  const out = {};
+  const round2 = (v) => Math.round(v * 100) / 100;
+  const baseKeys = Object.keys(bases).sort((x, y) => {
+    if (x === '(未填基地)') return 1;
+    if (y === '(未填基地)') return -1;
+    return x.localeCompare(y, 'zh');
+  });
+  baseKeys.forEach((b) => {
+    const st = bases[b];
+    const gjSet = new Map();
+    ys.forEach((r) => { const v = g(r, '高经'); if (g(r, '基地') === b && v && v !== 'null' && v !== '/' && !gjSet.has(v)) gjSet.set(v, ''); });
+    dc.forEach((r) => { const v = g(r, '高经'); if (g(r, '基地') === b && v && v !== 'null' && v !== '/' && !gjSet.has(v)) gjSet.set(v, ''); });
+    const gjs = [...gjSet.keys()].map((nm) => {
+      const key = nm + '|' + b;
+      return { name: nm, empId: empIdx.get(key) || '', ambEmp: empAmb.has(key) };
+    }).sort((x, y) => x.name.localeCompare(y.name, 'zh'));
+    // null 归属规则的目标高经补进名单（其业绩可能全部来自 null 直管行，底表高经列未出现）
+    (db.gjTeam.nullRules || []).forEach((nr) => {
+      if (nr.enabled && nr.base === b && nr.targetName && !gjs.some((x) => x.name === nr.targetName)) {
+        gjs.push({ name: nr.targetName, empId: nr.targetEmpId || '', ambEmp: false });
+      }
+    });
+    gjs.sort((x, y) => x.name.localeCompare(y.name, 'zh'));
+    const mgrs = Object.entries(st.mgrs).map(([nm, v]) => {
+      const key = nm + '|' + b;
+      return { name: nm, empId: empIdx.get(key) || '', ambEmp: empAmb.has(key), ys: { n: v.ys.n, amt: round2(v.ys.amt) }, dc: { n: v.dc.n, amt: round2(v.dc.amt) } };
+    }).sort((x, y) => (y.ys.amt + y.dc.amt) - (x.ys.amt + x.dc.amt));
+    out[b] = { gjs, mgrs, ysNull: { n: st.ysNull.n, amt: round2(st.ysNull.amt), gj: st.ysNull.gj }, dcNull: { n: st.dcNull.n, amt: round2(st.dcNull.amt), gj: st.dcNull.gj }, dirty: { n: st.dirty.n, amt: round2(st.dirty.amt) } };
+  });
+  return out;
+}
+
+/** 按勾选映射计算单个高经的双口径团队业绩 */
+function gjTeamCalc(base, gjName) {
+  const all = buildGjTeam();
+  const b = all[base];
+  if (!b) return null;
+  const gjCfg = db.gjTeam || {};
+  const selKey = base + '|' + gjName;
+  const sel = (gjCfg.selections || {})[selKey] || null;
+  const picked = sel ? sel.mgrs : [];
+  const includeSelf = sel ? !!sel.includeSelf : false;
+  const byName = new Map(b.mgrs.map((m) => [m.name, m]));
+  const rules = (gjCfg.nullRules || []).filter((x) => x.enabled);
+  const ruleYs = rules.find((x) => x.source === 'ys' && x.base === base && x.targetName === gjName);
+  const ruleDc = rules.find((x) => x.source === 'dc' && x.base === base && x.targetName === gjName);
+  const self = {
+    ys: { n: 0, amt: 0 }, dc: { n: 0, amt: 0 },
+    dcSales: [], sales: []
+  };
+  // 本人在经理层：两源经理列=本人 的行（销售名单从底表取）
+  const g = (r, k) => String(r[k] == null ? '' : r[k]).trim();
+  const num = (v) => Number(String(v == null ? '' : v).replace(/,/g, '')) || 0;
+  (db.rows.ds_youshu || []).forEach((r) => {
+    if (g(r, '基地') !== base || g(r, '经理') !== gjName) return;
+    self.ys.n += 1; self.ys.amt += num(r['销售直推业绩']);
+    if (g(r, '销售姓名')) self.sales.push(g(r, '销售姓名'));
+  });
+  (db.rows.ds_direct || []).forEach((r) => {
+    if (g(r, '基地') !== base || g(r, '经理') !== gjName) return;
+    const amt = num(r['转化金额']);
+    if (amt <= 0) return;
+    self.dc.n += 1; self.dc.amt += amt;
+    if (g(r, '姓名')) self.dcSales.push(g(r, '姓名'));
+  });
+  const rows = [];
+  if (sel) {
+    if (includeSelf) {
+      rows.push({ name: gjName + '（本人直管）', empId: (b.gjs.find((x) => x.name === gjName) || {}).empId || '', self: true, rule: false, ys: { n: self.ys.n, amt: Math.round(self.ys.amt * 100) / 100 }, dc: { n: self.dc.n, amt: Math.round(self.dc.amt * 100) / 100 } });
+    }
+    picked.forEach((nm) => {
+      const m = byName.get(nm);
+      if (m) rows.push({ name: m.name, empId: m.empId, self: false, rule: false, ys: m.ys, dc: m.dc });
+    });
+    if (ruleYs) rows.push({ name: '直管（经理=null · 规则归' + gjName + '）', empId: '规则', self: false, rule: true, ys: { n: b.ysNull.n, amt: b.ysNull.amt }, dc: { n: 0, amt: 0 } });
+    if (ruleDc) rows.push({ name: '直管（经理=null · 规则归' + gjName + '）', empId: '规则', self: false, rule: true, ys: { n: 0, amt: 0 }, dc: { n: b.dcNull.n, amt: b.dcNull.amt } });
+  }
+  const total = {
+    ys: { n: rows.reduce((s, r) => s + r.ys.n, 0), amt: Math.round(rows.reduce((s, r) => s + r.ys.amt, 0) * 100) / 100 },
+    dc: { n: rows.reduce((s, r) => s + r.dc.n, 0), amt: Math.round(rows.reduce((s, r) => s + r.dc.amt, 0) * 100) / 100 }
+  };
+  const mgrRows = rows.filter((r) => !r.self && !r.rule);
+  const mgrSub = {
+    ys: { n: mgrRows.reduce((s, r) => s + r.ys.n, 0), amt: Math.round(mgrRows.reduce((s, r) => s + r.ys.amt, 0) * 100) / 100 },
+    dc: { n: mgrRows.reduce((s, r) => s + r.dc.n, 0), amt: Math.round(mgrRows.reduce((s, r) => s + r.dc.amt, 0) * 100) / 100 }
+  };
+  return {
+    base, gjName,
+    selection: sel ? { mgrs: picked, includeSelf, at: sel.at, by: sel.by } : null,
+    rows, total, mgrSub,
+    self: { ys: { n: self.ys.n, amt: Math.round(self.ys.amt * 100) / 100 }, dc: { n: self.dc.n, amt: Math.round(self.dc.amt * 100) / 100 }, dcSales: [...new Set(self.dcSales)], sales: [...new Set(self.sales)] },
+    baseInfo: b
+  };
+}
+
+/* =========================================================================
    2.6 KOC 三类分层
    分类 A：全部累计新正价用户数 ≥ 6（可申请星推官）
    分类 B：3 ≤ 累计新正价用户数 ≤ 5（潜力星推官）
@@ -2210,6 +2388,61 @@ async function handleApi(req, res, url) {
       full.boards.C.forEach((x) => { x.rows = filterPerson(x.rows); });
     }
     return sendJson(res, 200, { ...full, scope: user.role });
+  }
+
+  // 2.9 高经团队业绩（双口径数透：直推 + 接leads）
+  if (p === '/gj-team' && method === 'GET') {
+    let bases = buildGjTeam();
+    if (user.role === 'base' && user.baseId) {
+      const b = db.bases.find((x) => x.id === user.baseId);
+      const mine = b ? String(b.name).replace(/基地$/, '') : '';
+      bases = mine && bases[mine] ? { [mine]: bases[mine] } : {};
+    }
+    const q = Object.fromEntries(url.searchParams.entries());
+    let calc = null;
+    if (q.base && q.gj && bases[q.base]) calc = gjTeamCalc(q.base, q.gj);
+    return sendJson(res, 200, { bases, nullRules: db.gjTeam.nullRules, selections: db.gjTeam.selections, calc, scope: user.role, canEdit: user.role === 'admin' });
+  }
+
+  if (p === '/gj-team/select' && method === 'POST') {
+    if (user.role !== 'admin') return sendJson(res, 403, { error: '仅管理员可调整高经团队归属' });
+    let body;
+    try { body = await readBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const base = String(body.base || '').trim();
+    const gjName = String(body.gjName || '').trim();
+    const mgrs = Array.isArray(body.mgrs) ? body.mgrs.map((x) => String(x).trim()).filter(Boolean) : [];
+    const includeSelf = !!body.includeSelf;
+    const all = buildGjTeam();
+    if (!all[base]) return sendJson(res, 400, { error: '基地不存在：' + base });
+    if (!all[base].gjs.some((x) => x.name === gjName)) return sendJson(res, 400, { error: '该基地高结名单中无此人：' + gjName });
+    const valid = new Set(all[base].mgrs.map((x) => x.name));
+    const bad = mgrs.filter((x) => !valid.has(x));
+    if (bad.length) return sendJson(res, 400, { error: '以下经理不在该基地名单：' + bad.join(', ') });
+    db.gjTeam.selections[base + '|' + gjName] = { base, gjName, mgrs, includeSelf, at: nowStr(), by: user.name };
+    audit(user, '调整高经团队归属', `${base} · ${gjName}：${mgrs.length} 位经理${includeSelf ? ' + 本人直管' : ''}`, req);
+    saveDb();
+    return sendJson(res, 200, { ok: true, calc: gjTeamCalc(base, gjName) });
+  }
+
+  if (p === '/gj-team/nullrule' && method === 'POST') {
+    if (user.role !== 'admin') return sendJson(res, 403, { error: '仅管理员可维护 null 归属规则' });
+    let body;
+    try { body = await readBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const source = body.source === 'dc' ? 'dc' : 'ys';
+    const base = String(body.base || '').trim();
+    const targetName = String(body.targetName || '').trim();
+    if (!base) return sendJson(res, 400, { error: '缺少基地' });
+    const rules = db.gjTeam.nullRules;
+    const i = rules.findIndex((x) => x.source === source && x.base === base);
+    if (!targetName) {
+      if (i >= 0) { rules.splice(i, 1); audit(user, '删除 null 归属规则', `${source === 'ys' ? '直推' : '接leads'} · ${base}`, req); }
+    } else {
+      const rec = { id: i >= 0 ? rules[i].id : 'nr_' + crypto.randomBytes(3).toString('hex'), source, base, targetName, targetEmpId: String(body.targetEmpId || '').trim(), enabled: body.enabled !== false, at: nowStr(), by: user.name, note: String(body.note || '') };
+      if (i >= 0) rules[i] = rec; else rules.push(rec);
+      audit(user, '设置 null 归属规则', `${source === 'ys' ? '直推' : '接leads'} · ${base} → ${targetName}`, req);
+    }
+    saveDb();
+    return sendJson(res, 200, { ok: true, nullRules: rules });
   }
 
   if (p === '/direct-uncv/followup' && method === 'POST') {
