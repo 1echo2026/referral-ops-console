@@ -509,11 +509,11 @@ function renderUncv() {
     const reason = (Rec.uncvReasons || {})[String(r.userId || '').trim()] || null;
     return `
     <tr>
-      <td class="num">${esc(r.time || r.month || '—')}</td>
-      <td class="num">${esc(r.userId || '—')}</td>
       <td>${esc(r.base || '未匹配')}</td>
       <td class="cell-left">${esc(r.ccId || '—')}</td>
       <td class="num">${esc(r.empId || '—')}</td>
+      <td class="num">${esc(r.time || r.month || '—')}</td>
+      <td class="num">${esc(r.userId || '—')}</td>
       <td class="num">${fmtCompact(r.amount || 0, 'money')}</td>
       <td>${r.refund ? '<span class="tag-refund">完全退款</span>' : '<span class="tag-sim">未转化</span>'}</td>
       <td>${reason ? `<span class="text-sm">${esc(reason.text)}</span><div class="text-xs muted">${esc(reason.by)} · ${esc(reason.at)}</div>` : '<span class="muted">—</span>'}</td>
@@ -552,7 +552,7 @@ function renderUncv() {
     </div>
     <div class="table-wrap" style="max-height:62vh">
       <table class="table">
-        <thead><tr><th>分配时间</th><th>用户ID</th><th>基地</th><th>CCid</th><th>绑定工号</th><th>累计转化金额</th><th>状态</th><th>未转化原因</th><th></th></tr></thead>
+        <thead><tr><th>基地</th><th>CCid</th><th>工号</th><th>分配时间</th><th>用户id</th><th>转化金额</th><th>状态</th><th>未转化原因</th><th></th></tr></thead>
         <tbody>${rowsHtml || `<tr><td colspan="9"><div class="empty"><h3>当前筛选条件下暂无未转化数据</h3><p>调整筛选条件后重试</p></div></td></tr>`}</tbody>
       </table>
     </div>
@@ -580,12 +580,12 @@ function renderUncv() {
 function exportUncv() {
   const rows = uncvFiltered();
   downloadCsv('接例子未转化名单.csv', rows, [
-    { label: '分配时间', value: (r) => r.time || r.month || '' },
-    { label: '用户ID', value: (r) => r.userId || '' },
     { label: '基地', value: (r) => r.base || '未匹配' },
     { label: 'CCid', value: (r) => r.ccId || '' },
-    { label: '绑定工号', value: (r) => r.empId || '' },
-    { label: '累计转化金额', value: (r) => r.amount || 0 },
+    { label: '工号', value: (r) => r.empId || '' },
+    { label: '分配时间', value: (r) => r.time || r.month || '' },
+    { label: '用户id', value: (r) => r.userId || '' },
+    { label: '转化金额', value: (r) => r.amount || 0 },
     { label: '状态', value: (r) => (r.refund ? '完全退款' : '未转化') },
     { label: '未转化原因', value: (r) => { const x = (Rec.uncvReasons || {})[String(r.userId || '').trim()]; return x ? x.text : ''; } }
   ]);
@@ -1324,6 +1324,32 @@ function tierBadge(status, cfg) {
   return `<span class="koc-tier" style="background:color-mix(in srgb, ${hex} 16%, white);color:color-mix(in srgb, ${hex} 62%, black);border:1px solid color-mix(in srgb, ${hex} 32%, white)">${esc(status)}</span>`;
 }
 
+/** 高潜用户跟进表固定列集（2.14 表头规格）：
+ *  序号 / 老用户id / 新体验用户数量(26年) / 新正价用户数量(26年) / 累计金额 / 销售 / 工号 /
+ *  高经 / 经理 / 主管 / 组长 / 累计推荐体验课用户数量(历史累计) / 累计推荐体验正价用户数量(历史累计) / 重点关注 */
+function kocListCols() {
+  const cfg = kocCfg();
+  const t1Label = `历史累计≥${cfg.t1}`;
+  const nm = (k) => (r) => `<span class="nw-name">${esc(r[k] || '—')}</span>`;
+  const num = (k) => (r) => `<span class="num">${r[k] === 0 || r[k] ? fmt(r[k], 'int') : '—'}</span>`;
+  return [
+    { label: '序号', get: (r) => `<span class="num muted">${esc(r._rowNo || '—')}</span>` },
+    { label: '老用户id', get: (r) => `<span class="mono text-sm" style="word-break:break-all">${esc(r.oldUserId || '—')}</span>` },
+    { label: '新体验用户数量', get: num('y26Exp') },
+    { label: '新正价用户数量', get: num('y26Pay') },
+    { label: '累计金额', get: (r) => `<span class="num">${r.amount === 0 || r.amount ? fmt(r.amount, 'money') : '—'}</span>` },
+    { label: '销售', get: nm('empName') },
+    { label: '工号', get: (r) => `<span class="mono text-sm">${esc(r.empId || '—')}</span>` },
+    { label: '高经', get: nm('managerName') },
+    { label: '经理', get: nm('manager2') },
+    { label: '主管', get: nm('manager3') },
+    { label: '组长', get: nm('manager4') },
+    { label: '累计推荐体验课用户数量', get: num('cumExp') },
+    { label: '累计推荐体验正价用户数量', get: num('cumPay') },
+    { label: '重点关注', get: (r) => (r.status === t1Label ? '<span class="tag-check">✓</span>' : '<span class="muted">—</span>') }
+  ];
+}
+
 /** KOC 底表列宽调整：基地/负责人加宽，人名列与基地强制单行不换行 */
 function kocThStyle(label) {
   switch (label) {
@@ -1349,35 +1375,37 @@ function renderTable() {
   const cfg = koc ? kocCfg() : null;
   const baseColor = {};
   Rec.bases.forEach((b) => { baseColor[b.id] = b.color; });
-  // 标准列 + 底表自定义列（数值型右对齐格式化；KOC 底表：层级彩色标签 / 重合淡红标签 / 模拟备注）
-  const allCols = cols.map((k) => {
-    const label = k === 'status' && koc ? 'KOC层级' : COLS[k].label;
-    return {
-      label,
-      thStyle: koc ? kocThStyle(label) : '',
-      tdClass: koc && kocTdNoWrap(label) ? 'nw' : '',
-      get: (r) => {
-        const row = { ...r, baseColor: baseColor[r.baseId] };
-        if (k === 'status') return koc ? tierBadge(r.status, cfg) : COLS.status.get(row);
-        return COLS[k].get(row);
+  // 高潜用户跟进表：固定表头（序号/老用户id/新体验/新正价/累计金额/销售/工号/架构四列/累计推荐/重点关注）
+  let allCols;
+  if (koc) {
+    allCols = kocListCols();
+  } else {
+    allCols = cols.map((k) => {
+      const label = COLS[k].label;
+      return {
+        label,
+        get: (r) => {
+          const row = { ...r, baseColor: baseColor[r.baseId] };
+          if (k === 'status') return COLS.status.get(row);
+          return COLS[k].get(row);
+        }
+      };
+    }).concat(dyn.map((f) => {
+      let get;
+      if (f.key === 'overlapNote') {
+        get = (r) => (r.overlapNote ? '<span class="tag-overlap">重合</span>' : '<span class="muted">—</span>');
+      } else if (f.key === 'oldUserId') {
+        get = (r) => `<span class="mono text-sm" style="word-break:break-all">${esc(r[f.key] || '—')}</span>`;
+      } else if (f.key === 'managerName' || f.key === 'manager2' || f.key === 'manager3' || f.key === 'manager4' || f.key === 'manager5') {
+        get = (r) => `<span class="nw-name">${esc(r[f.key] || '—')}</span>`;
+      } else if (f.type === 'number') {
+        get = (r) => `<span class="num">${r[f.key] === 0 || r[f.key] ? fmt(r[f.key], 'int') : '—'}</span>`;
+      } else {
+        get = (r) => esc(r[f.key] || '—');
       }
-    };
-  }).concat(dyn.map((f) => {
-    const thStyle = koc ? kocThStyle(f.label) : '';
-    let get;
-    if (f.key === 'overlapNote') {
-      get = (r) => (r.overlapNote ? '<span class="tag-overlap">重合</span>' : '<span class="muted">—</span>');
-    } else if (f.key === 'oldUserId') {
-      get = (r) => `<span class="mono text-sm" style="word-break:break-all">${esc(r[f.key] || '—')}</span>`;
-    } else if (f.key === 'managerName' || f.key === 'manager2' || f.key === 'manager3' || f.key === 'manager4' || f.key === 'manager5') {
-      get = (r) => `<span class="nw-name">${esc(r[f.key] || '—')}</span>`;
-    } else if (f.type === 'number') {
-      get = (r) => `<span class="num">${r[f.key] === 0 || r[f.key] ? fmt(r[f.key], 'int') : '—'}</span>`;
-    } else {
-      get = (r) => esc(r[f.key] || '—');
-    }
-    return { label: f.label, thStyle, tdClass: koc && kocTdNoWrap(f.label) ? 'nw' : '', get };
-  }));
+      return { label: f.label, get };
+    }));
+  }
 
   $('#pageSubtitle').textContent = `${d.dataset.name} · 搜索、筛选并查看每一条名单明细；姓名与手机号已脱敏`;
 
