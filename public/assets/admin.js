@@ -179,7 +179,7 @@ function renderDatasets() {
         </div>
         <div class="ds-subgroup">
           <div class="ds-sub-title">直推转化</div>
-          ${winCard(5, 'violet', 'userPlus', '转介绍转化跟踪', '直推链路 a-b-c 绑定关系与转化金额 · 直推未转化 / 龙珠奖净营收底表', dsStat('ds_direct'), upBtn('ds_direct') + logicBtn('ds_direct'))}
+          ${winCard(5, 'violet', 'userPlus', '直推转化明细', '直推链路 a-b-c 绑定关系与转化金额 · 直推转化明细 / 龙珠奖净营收底表', dsStat('ds_direct'), upBtn('ds_direct') + logicBtn('ds_direct'))}
         </div>
       </div>
     </section>
@@ -193,7 +193,7 @@ function renderDatasets() {
         </div>
         <div class="ds-subgroup">
           <div class="ds-sub-title">钻石发放明细</div>
-          ${winCard(7, 'violet', 'spark', '钻石商城财务报表', '钻石发放与消耗流水 · 匹配已转化老用户 → 未使用名单（解冻：正价课满 30 天未退）', dsStat('ds_diamond'), upBtn('ds_diamond') + logicBtn('ds_diamond'))}
+          ${winCard(7, 'violet', 'spark', '钻石发放与使用明细', '钻石发放与消耗流水 · 匹配已转化老用户 → 未使用名单（解冻：正价课满 30 天未退）', dsStat('ds_diamond'), upBtn('ds_diamond') + logicBtn('ds_diamond'))}
           ${winCard(6, 'violet', 'spark', '高潜名单', 'KOC 三类分层与高潜总池（与 koc 板块同一份数据）', dsStat('ds_high'), upBtn('ds_high') + logicBtn('ds_high'), refBadge)}
         </div>
       </div>
@@ -382,7 +382,7 @@ function openDatasetWizard() {
       if (!descEl.value.trim()) descEl.value = '历史累计与26年转介绍两段上传，自动分层并标记重合';
       const calEl = box.querySelector('#nwCaliber');
       if (!calEl.value.trim()) calEl.value = '历史≥6：累计新正价≥6；历史3-6：3≤累计新正价<6；26年推荐成功：26年新正价>0 且未进入历史名单；重合：历史≥3 且 26年>0';
-      hint.innerHTML = 'KOC 名单口径：<b>先上传「① 历史累计表」</b>（有数导出 · 转介绍时间=全部时间，替换全表），<b>再上传「② 26年本年表」</b>（转介绍时间=本年，系统按工号自动合并为一人一行）。每次上传后自动按 累计/26年新正价用户数量 分层（默认：历史累计≥6 / 历史累计3-6 / 26年推荐成功 / 未入选，阈值与颜色可在前台「数据明细」页的「划分层级」「层级颜色」按钮调整），并对「历史≥第二阈值 且 26年>0」的人标注重合备注。看板按 KOC层级 展示分布与筛选。';
+      hint.innerHTML = 'KOC 名单口径：<b>先上传「① 历史累计表」</b>（有数导出 · 转介绍时间=全部时间，替换全表），<b>再上传「② 26年本年表」</b>（转介绍时间=本年，系统按工号自动合并为一人一行）。每次上传后自动按 累计/26年新正价用户数量 分层（默认：历史累计≥6 / 历史累计3-6 / 26年推荐成功 / 未入选，阈值与颜色可在后台「展示配置」的 KOC 分层配置区调整，仅管理员可改），并对「历史≥第二阈值 且 26年>0」的人标注重合备注。看板按 KOC层级 展示分布与筛选。';
     } else {
       hint.innerHTML = '标准字段使用默认集（日期 / 基地 / 工号 / 姓名 / 客户姓名 / 手机号 / 跟进状态 / 渠道 / 金额），指标默认只生成「记录数」。上传数据后请到「取数逻辑」完善字段映射与指标口径。';
     }
@@ -2709,7 +2709,33 @@ function renderSettings() {
           <button class="btn btn-primary" id="saveSettings" type="button">保存配置</button>
         </div>
       </div>
+    </section>
+    ${(() => {
+      const kocDs = (App.datasets || []).find((d) => d.preset === 'koc');
+      if (!kocDs) return '';
+      const cfg = (kocDs.kocConfig) || { t1: 6, t2: 3, colors: { t1: '#e0a93e', t2: '#b48cc8', t3: '#5b9bd5', t4: '#5bbf8a' } };
+      const chips = [
+        ['t1', `最高层级（历史累计≥${cfg.t1}）`, cfg.colors.t1],
+        ['t2', `第二层（历史累计${cfg.t2}-${cfg.t1}）`, cfg.colors.t2],
+        ['t3', '26年推荐成功', cfg.colors.t3],
+        ['t4', '未入选', cfg.colors.t4]
+      ];
+      return `
+    <section class="card" style="margin-top:14px">
+      <div class="card-head">
+        <div><h2><span class="head-icon" style="background:color-mix(in srgb, #8b5cf6 14%, white);color:#7c3aed">${icon('spark', 14)}</span>KOC 高潜名单分层配置</h2>
+          <p class="sub">划分阈值与层级颜色仅管理员可调（原前台按钮已迁移至此），前台「明细数据 → 高潜老用户跟进表」按此配置展示</p></div>
+        <div style="display:flex;gap:8px">
+          <button class="btn btn-sm" id="admKocTierBtn" type="button">${icon('layers', 13)}划分层级</button>
+          <button class="btn btn-sm" id="admKocColorBtn" type="button">${icon('spark', 13)}层级颜色</button>
+        </div>
+      </div>
+      <div class="card-body" style="display:flex;gap:10px;flex-wrap:wrap;align-items:center">
+        ${chips.map(([k, label, hex]) => `<span class="koc-tier" style="background:color-mix(in srgb, ${hex} 16%, white);color:color-mix(in srgb, ${hex} 62%, black);border:1px solid color-mix(in srgb, ${hex} 32%, white)">${esc(label)}</span>`).join('')}
+        <span class="text-xs muted" style="margin-left:auto">${esc(kocDs.name)} · ${fmtInt(kocDs.rowCount)} 行 · 阈值：历史累计≥${cfg.t1} 为最高层，${cfg.t2}-${cfg.t1} 为第二层</span>
+      </div>
     </section>`;
+    })()}`;
 
   $('#saveSettings').addEventListener('click', async () => {
     const kpiToggles = {};
@@ -2739,6 +2765,104 @@ function renderSettings() {
       await refreshBootstrap();
       toast('配置已保存，前台即时生效', 'ok');
     } catch (err) { toast(err.message, 'err'); }
+  });
+
+  // KOC 分层配置（仅管理员，原前台按钮迁移至此）
+  const kocTierBtn = $('#admKocTierBtn');
+  const kocColorBtn = $('#admKocColorBtn');
+  if (kocTierBtn) kocTierBtn.addEventListener('click', openAdmKocTierModal);
+  if (kocColorBtn) kocColorBtn.addEventListener('click', openAdmKocColorModal);
+}
+
+/* ---------------- KOC 分层配置弹窗（仅管理员，2.12 自前台迁移） ---------------- */
+function admKocDataset() { return (App.datasets || []).find((d) => d.preset === 'koc') || null; }
+function admKocCfg() {
+  const ds = admKocDataset();
+  return (ds && ds.kocConfig) || { t1: 6, t2: 3, colors: { t1: '#e0a93e', t2: '#b48cc8', t3: '#5b9bd5', t4: '#5bbf8a' } };
+}
+async function admSaveKocConfig(body) {
+  const ds = admKocDataset();
+  if (!ds) { toast('未找到高潜名单底表', 'err'); return; }
+  try {
+    const r = await api('/api/admin/koc-config', { method: 'POST', body: { datasetId: ds.id, ...body } });
+    if (ds) ds.kocConfig = r.config;
+    closeModal();
+    renderSettings();
+    const summary = Object.entries(r.counts || {}).map(([k, v]) => `${k} ${fmtInt(v)}`).join(' · ');
+    toast(`已保存并重算：${summary}`, 'ok');
+  } catch (err) { toast(err.message, 'err'); }
+}
+
+function openAdmKocTierModal() {
+  const cfg = admKocCfg();
+  openModal({
+    title: '划分层级设置',
+    subtitle: '按「累计新正价用户数量」划分名单层级，保存后全表自动重算',
+    body: `
+      <div class="form-grid">
+        <div class="form-field"><label>最高层级阈值（累计新正价用户数量 ≥ 此值）</label>
+          <input class="control" id="kocT1" type="number" min="1" step="1" value="${cfg.t1}"></div>
+        <div class="form-field"><label>第二层阈值（≥ 此值且低于最高层级阈值）</label>
+          <input class="control" id="kocT2" type="number" min="0" step="1" value="${cfg.t2}"></div>
+      </div>
+      <div class="alert" style="margin-top:14px">
+        ${icon('info', 15)}
+        <div>分层规则：<b>最高层级</b> = 累计新正价 ≥ 最高阈值（如填 <b>10</b>，则累计新正价大于等于 10 的用户为最高层级）；<b>第二层</b> = 累计新正价 ≥ 第二阈值且未达最高层；<b>26年推荐成功</b> = 26年新正价 &gt; 0 且不在前两层；其余为<b>未入选</b>。重合备注 = 累计新正价 ≥ 第二阈值 且 26年新正价 &gt; 0。</div>
+      </div>`,
+    footer: `
+      <button class="btn" id="kocTierCancel" type="button">取消</button>
+      <button class="btn btn-primary" id="kocTierSave" type="button">保存并重算</button>`,
+    onMount: (box) => {
+      box.querySelector('#kocTierCancel').addEventListener('click', closeModal);
+      box.querySelector('#kocTierSave').addEventListener('click', () => {
+        const t1 = parseInt(box.querySelector('#kocT1').value, 10);
+        const t2 = parseInt(box.querySelector('#kocT2').value, 10);
+        if (!Number.isFinite(t1) || t1 < 1) { toast('最高层级阈值必须是不小于 1 的整数', 'err'); return; }
+        admSaveKocConfig({ t1, t2: Number.isFinite(t2) ? t2 : 0, colors: {} });
+      });
+    }
+  });
+}
+
+function openAdmKocColorModal() {
+  const cfg = admKocCfg();
+  const items = [
+    ['t1', `最高层级（当前：历史累计≥${cfg.t1}）`, cfg.colors.t1],
+    ['t2', `第二层（当前：历史累计${cfg.t2}-${cfg.t1}）`, cfg.colors.t2],
+    ['t3', '26年推荐成功', cfg.colors.t3],
+    ['t4', '未入选', cfg.colors.t4]
+  ];
+  openModal({
+    title: '层级颜色设置',
+    subtitle: '为各 KOC 层级标签挑选颜色，保存后前台立即生效',
+    body: `
+      <div class="form-grid">
+        ${items.map(([k, label, hex]) => `
+          <div class="form-field"><label>${esc(label)}</label>
+            <div style="display:flex;align-items:center;gap:10px">
+              <input type="color" id="kocColor_${k}" value="${hex}" style="width:44px;height:34px;padding:2px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer">
+              <span class="mono text-sm muted">${hex}</span>
+            </div>
+          </div>`).join('')}
+      </div>
+      <div class="alert" style="margin-top:14px">
+        ${icon('info', 15)}
+        <div>标签底色与文字颜色会按所选颜色自动生成淡色样式。</div>
+      </div>`,
+    footer: `
+      <button class="btn" id="kocColorCancel" type="button">取消</button>
+      <button class="btn btn-primary" id="kocColorSave" type="button">保存颜色</button>`,
+    onMount: (box) => {
+      box.querySelector('#kocColorCancel').addEventListener('click', closeModal);
+      box.querySelector('#kocColorSave').addEventListener('click', () => {
+        const colors = {};
+        items.forEach(([k]) => {
+          const v = box.querySelector(`#kocColor_${k}`).value;
+          if (/^#[0-9a-fA-F]{6}$/.test(v)) colors[k] = v;
+        });
+        admSaveKocConfig({ t1: cfg.t1, t2: cfg.t2, colors });
+      });
+    }
   });
 }
 
@@ -3345,7 +3469,8 @@ function renderGjteamAdmin() {
       <td>${esc(s.base)}</td>
       <td>${esc(s.mgrs.join('、') || '—')}${s.includeSelf ? ' <span class="badge blue">+本人直管</span>' : ''}</td>
       <td class="muted">${esc(s.by || '—')} · ${esc(s.at || '—')}</td>
-    </tr>`).join('') || '<tr><td colspan="4" class="muted" style="text-align:center;padding:18px">尚未配置任何归属映射</td></tr>';
+      <td><button class="btn btn-sm" type="button" data-clear-sel="${esc(k)}">清除</button></td>
+    </tr>`).join('') || '<tr><td colspan="5" class="muted" style="text-align:center;padding:18px">尚未配置任何归属映射</td></tr>';
 
   // 规则表
   const SRC_LABEL = { ys: '直推', dc: '接leads' };
@@ -3372,11 +3497,12 @@ function renderGjteamAdmin() {
           <select class="control" id="gjAdmGj" style="width:200px">${gjs.map((x) => `<option value="${esc(x.name)}" ${x.name === gjState.gj ? 'selected' : ''}>${esc(x.name)}${x.empId ? ' ' + esc(x.empId) : ''}</option>`).join('')}</select></div>
         <label class="field" style="gap:6px;cursor:pointer"><input type="checkbox" id="gjAdmSelf" ${gjState.includeSelf ? 'checked' : ''}><span style="font-size:13px">计入本人直管（经理列=本人的行）</span></label>
         <button class="btn btn-primary btn-sm" id="gjAdmSave" type="button">${icon('check', 14)}保存映射并核算</button>
+        ${saved ? `<button class="btn btn-sm" id="gjAdmClear" type="button" style="color:var(--danger)">${icon('refresh', 13)}清除映射重选</button>` : ''}
         ${saved ? `<span class="muted" style="font-size:12px">当前：${saved.mgrs.length} 位经理${saved.includeSelf ? ' + 本人' : ''}（${esc(saved.by)} · ${esc(saved.at)}）</span>` : '<span class="muted" style="font-size:12px">尚未配置</span>'}
       </div>
       <div class="table-wrap" style="max-height:360px">${mgrRows}</div>
       <div class="table-wrap" style="max-height:280px;border-top:1px solid var(--line)">
-        <table class="table"><thead><tr><th>高经</th><th>基地</th><th>归属经理</th><th>调整记录</th></tr></thead><tbody>${selRows}</tbody></table>
+        <table class="table"><thead><tr><th>高经</th><th>基地</th><th>归属经理</th><th>调整记录</th><th></th></tr></thead><tbody>${selRows}</tbody></table>
       </div>
     </section>
     <section class="card" style="margin-top:14px">
@@ -3420,6 +3546,17 @@ function renderGjteamAdmin() {
       renderGjteamAdmin();
     });
     if (id === 'gjAdmSelf') el.addEventListener('change', (e) => { gjState.includeSelf = e.target.checked; });
+    if (id === 'gjAdmClear') el.addEventListener('click', async () => {
+      if (!confirm(`确认清除 ${gjState.base} · ${gjState.gj} 的归属映射？清除后该高经名下经理回到「待指定」，可重新勾选。`)) return;
+      try {
+        await api('/api/gj-team/select', { method: 'POST', body: { base: gjState.base, gjName: gjState.gj, mgrs: [], includeSelf: false, clear: true } });
+        delete gjState.data.selections[gjState.base + '|' + gjState.gj];
+        gjState.picked = [];
+        gjState.includeSelf = false;
+        toast('映射已清除，可重新勾选经理', 'ok');
+        renderGjteamAdmin();
+      } catch (err) { toast(err.message, 'err'); }
+    });
     if (id === 'gjAdmSave') el.addEventListener('click', async () => {
       const mgrs = $$('.gjadm-mgr').filter((x) => x.checked).map((x) => x.value);
       try {
@@ -3455,6 +3592,22 @@ function renderGjteamAdmin() {
         const r = await api('/api/gj-team/nullrule', { method: 'POST', body: { source: rule.source, base: rule.base, targetName: '' } });
         gjState.data.nullRules = r.nullRules;
         toast('规则已删除', 'ok');
+        renderGjteamAdmin();
+      } catch (err) { toast(err.message, 'err'); }
+    });
+  });
+  // 2.12 映射总表逐行清除：选错经理时点「清除」重选
+  $$('#gjAdmBody [data-clear-sel]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const key = btn.dataset.clearSel;
+      const sel = (gjState.data.selections || {})[key];
+      if (!sel) return;
+      if (!confirm(`确认清除 ${sel.base} · ${sel.gjName} 的归属映射（${sel.mgrs.join('、')}${sel.includeSelf ? ' + 本人直管' : ''}）？清除后可重新勾选。`)) return;
+      try {
+        await api('/api/gj-team/select', { method: 'POST', body: { base: sel.base, gjName: sel.gjName, mgrs: [], includeSelf: false, clear: true } });
+        delete gjState.data.selections[key];
+        if (sel.base === gjState.base && sel.gjName === gjState.gj) { gjState.picked = []; gjState.includeSelf = false; }
+        toast('映射已清除，可重新勾选经理', 'ok');
         renderGjteamAdmin();
       } catch (err) { toast(err.message, 'err'); }
     });

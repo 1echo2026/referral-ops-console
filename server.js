@@ -153,6 +153,8 @@ function initDefaults() {
   db.bases.forEach((b) => { if (!b.status) b.status = 'active'; });
   if (!Array.isArray(db.tutor)) db.tutor = [];
   if (!db.followups || typeof db.followups !== 'object' || Array.isArray(db.followups)) db.followups = {};
+  // 接leads未转化原因（按用户ID持久化，2.12）
+  if (!db.uncvReasons || typeof db.uncvReasons !== 'object' || Array.isArray(db.uncvReasons)) db.uncvReasons = {};
   // 高经团队归属配置：selections=经理勾选映射（按高经持久化），nullRules=经理列 null 的归属规则（按数据源分开）
   if (!db.gjTeam || typeof db.gjTeam !== 'object') db.gjTeam = {};
   if (!db.gjTeam.selections || typeof db.gjTeam.selections !== 'object') db.gjTeam.selections = {};
@@ -242,6 +244,16 @@ function ensureWindowDatasets() {
     direct.desc = '转介绍转化跟踪明细：a-b-c 绑定关系与转化金额，用于直推未转化与钻石未使用';
     changed = true;
   }
+  // 2.12 数据类别更名（幂等）：全站统一展示名
+  const RENAME_MAP = {
+    ds_direct: '直推转化明细',
+    ds_diamond: '钻石发放与使用明细',
+    ds_deal: '销售业绩（直推+接leads）'
+  };
+  Object.entries(RENAME_MAP).forEach(([id, name]) => {
+    const d = db.datasets.find((x) => x.id === id);
+    if (d && d.name !== name) { d.name = name; changed = true; }
+  });
   // 窗口①/⑤ 补 a/b/c 三个可选字段（2.5 方案 B：a=销售UID / b=老用户ID(推荐人) / c=新用户ID(被推荐人)）
   const ABC_FIELDS = [
     { key: 'refA', label: '销售UID（a）', type: 'text', required: false, aliases: ['a', '销售uid', '销售UID'] },
@@ -889,6 +901,26 @@ function buildPerfReport(ds) {
       refund: refundIds.has(String(r.userId || '').trim())
     }));
 
+  // 2.12 接leads已转化明细：leads 分配表中命中订单池且累计转化金额 > 0 的行（与未转化互斥）
+  const converted = (leads || [])
+    .filter((r) => {
+      const hit = orderById[String(r.userId || '').trim()];
+      return hit && hit.total > 0;
+    })
+    .map((r) => {
+      const hit = orderById[String(r.userId || '').trim()];
+      return {
+        month: r.month || '',
+        time: r.time || '',
+        userId: r.userId || '',
+        base: r.base || '',
+        ccId: r.ccId || '',
+        empId: r.empId || '',
+        amount: hit.total,
+        refund: refundIds.has(String(r.userId || '').trim())
+      };
+    });
+
   return {
     frontline,
     direct: directTeams,
@@ -902,12 +934,15 @@ function buildPerfReport(ds) {
     },
     months,
     unconverted,
+    converted,
     stats: {
       directRows: ysRows.length || direct.length, youshuRows: ysRows.length,
       ordersRows: orders.length, leadsRows: leads.length,
       leadsUnmatched, leadsUsers: (leads || []).length,
       unconvertedCount: unconverted.length,
-      refundCount: unconverted.filter((r) => r.refund).length
+      refundCount: unconverted.filter((r) => r.refund).length,
+      convertedCount: converted.length,
+      convertedAmount: converted.reduce((s, r) => s + (r.amount || 0), 0)
     }
   };
 }
@@ -2369,6 +2404,31 @@ async function handleApi(req, res, url) {
     });
   }
 
+  // 2.12 接leads未转化原因：按用户ID 持久化；基地账号仅可填写本基地名单
+  if (p === '/uncv-reasons' && method === 'GET') {
+    return sendJson(res, 200, { reasons: db.uncvReasons || {} });
+  }
+  if (p === '/uncv-reason' && method === 'POST') {
+    let body;
+    try { body = await readBody(req); } catch (e) { return sendJson(res, 400, { error: e.message }); }
+    const userId = String(body.userId || '').trim();
+    const text = String(body.text || '').trim().slice(0, 200);
+    if (!userId) return sendJson(res, 400, { error: '缺少用户ID' });
+    const perfDs = db.datasets.find((d) => d.preset === 'perf');
+    const leads = perfDs ? (db.rows[`${perfDs.id}:leads`] || []) : [];
+    const row = leads.find((r) => String(r.userId || '').trim() === userId);
+    if (!row) return sendJson(res, 400, { error: 'leads 分配表中未找到该用户ID：' + userId });
+    if (user.role === 'base' && user.baseName) {
+      const norm = (s) => String(s || '').trim().replace(/基地$/, '');
+      if (norm(row.base) !== norm(user.baseName)) return sendJson(res, 403, { error: '仅可填写本基地名单的未转化原因' });
+    }
+    if (!text) delete db.uncvReasons[userId];
+    else db.uncvReasons[userId] = { text, by: user.name, at: nowStr() };
+    audit(user, '填写未转化原因', `${userId}：${text || '（清除）'}`, req);
+    saveDb();
+    return sendJson(res, 200, { ok: true, reasons: db.uncvReasons });
+  }
+
   // 2.6 KOC 三类分层
   if (p === '/koc-tier' && method === 'GET') {
     const full = buildKocTier();
@@ -2455,6 +2515,15 @@ async function handleApi(req, res, url) {
     const valid = new Set(all[base].mgrs.map((x) => x.name));
     const bad = mgrs.filter((x) => !valid.has(x));
     if (bad.length) return sendJson(res, 400, { error: '以下经理不在该基地名单：' + bad.join(', ') });
+    // 2.12 清除映射：选错经理时可整体清除重选
+    if (body.clear) {
+      const key = base + '|' + gjName;
+      const existed = db.gjTeam.selections[key];
+      delete db.gjTeam.selections[key];
+      audit(user, '清除高经团队归属', `${base} · ${gjName}${existed ? `（原 ${existed.mgrs.length} 位经理${existed.includeSelf ? ' + 本人直管' : ''}）` : '（无映射）'}`, req);
+      saveDb();
+      return sendJson(res, 200, { ok: true, cleared: !!existed, calc: gjTeamCalc(base, gjName) });
+    }
     db.gjTeam.selections[base + '|' + gjName] = { base, gjName, mgrs, includeSelf, at: nowStr(), by: user.name };
     audit(user, '调整高经团队归属', `${base} · ${gjName}：${mgrs.length} 位经理${includeSelf ? ' + 本人直管' : ''}`, req);
     saveDb();

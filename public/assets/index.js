@@ -8,6 +8,9 @@
 
 const Index = { user: null, bases: [], managers: [], datasets: [], board: null };
 
+// 总览「数据类别」下拉隐藏的底表（2.12：去掉质检台账与有数业绩完成度）
+const BOARD_HIDDEN_DATASETS = ['ds_qc', 'ds_youshu'];
+
 async function indexBoot() {
   let b;
   try {
@@ -16,7 +19,8 @@ async function indexBoot() {
     location.href = '/login';
     return;
   }
-  Object.assign(Index, { user: b.user, bases: b.bases, managers: b.managers, datasets: b.datasets });
+  const boardDatasets = (b.datasets || []).filter((d) => !BOARD_HIDDEN_DATASETS.includes(d.id));
+  Object.assign(Index, { user: b.user, bases: b.bases, managers: b.managers, datasets: boardDatasets });
   const settings = b.settings || {};
   const isBase = b.user.role === 'base';
   const base = Index.bases.find((x) => x.id === b.user.baseId);
@@ -49,7 +53,7 @@ async function indexBoot() {
     user: b.user,
     bases: b.bases,
     managers: b.managers,
-    datasets: b.datasets,
+    datasets: boardDatasets,
     settings,
     showBaseFilter: !isBase,
     fixedBaseId: isBase ? b.user.baseId : 'all',

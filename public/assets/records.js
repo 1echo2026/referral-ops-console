@@ -48,7 +48,10 @@ const Rec = {
   gjteamData: null,
   dmd2: { mode: 'orders' },
   ddetail: { from: '', to: '', base: 'all', q: '', limit: 300 },
-  ddetailData: null, ddetailCount: ''
+  ddetailData: null, ddetailCount: '',
+  lconv: { from: '', to: '', base: 'all', q: '', limit: 200 },
+  lconvData: null, lconvCount: '',
+  uncvReasons: {}
 };
 
 // 明细数据页隐藏的底表页签（业绩相关 + 质检台账/转介绍转化跟踪已下线展示）
@@ -75,6 +78,7 @@ function isGjteam() { return Rec.dataset === '__gjteam'; }
 function isRank() { return Rec.dataset === '__rank'; }
 function isDmd2() { return Rec.dataset === '__dmd2'; }
 function isDdetail() { return Rec.dataset === '__ddetail'; }
+function isLconv() { return Rec.dataset === '__lconv'; }
 
 function highDataset() { return Rec.datasets.find((d) => d.id === 'ds_high') || null; }
 function diamondDataset() { return Rec.datasets.find((d) => d.id === 'ds_diamond') || null; }
@@ -111,6 +115,7 @@ async function recordsBoot() {
   else if (h.get('dataset') === '__dragon' && perfDataset()) Rec.dataset = '__dragon';
   else if (h.get('dataset') === '__gjteam' && perfDataset()) Rec.dataset = '__rank';
   else if (h.get('dataset') === '__rank' && perfDataset()) Rec.dataset = '__rank';
+  else if (h.get('dataset') === '__lconv' && perfDataset() && Rec.user.role === 'admin') Rec.dataset = '__lconv';
   else if (h.get('dataset') && Rec.datasets.some((d) => d.id === h.get('dataset') && !HIDDEN_TAB_DATASETS.includes(d.id))) Rec.dataset = h.get('dataset');
   else if (perfDataset() && !h.get('base') && !h.get('status') && !h.get('q') && !h.get('from') && !h.get('to')) Rec.dataset = '__rank';
   else Rec.dataset = ((Rec.datasets.find((d) => !HIDDEN_TAB_DATASETS.includes(d.id))) || Rec.datasets[0] || {}).id || '';
@@ -139,6 +144,11 @@ async function recordsBoot() {
     if (isDdetail()) {
       Rec.ddetail = { from: '', to: '', base: 'all', q: '', limit: 300 };
       renderDdetail();
+      return;
+    }
+    if (isLconv()) {
+      Rec.lconv = { from: '', to: '', base: 'all', q: '', limit: 200 };
+      renderLconv();
       return;
     }
     if (isDmd2()) {
@@ -195,6 +205,7 @@ async function recordsBoot() {
   $('#exportBtn').addEventListener('click', () => {
     if (isRank()) { exportRank(); return; }
     if (isDdetail()) { exportDdetail(); return; }
+    if (isLconv()) { exportLconv(); return; }
     if (isDmd2()) { if (Rec.dmd2.mode === 'orders') exportDiamondOrders(); else exportDiamond(); return; }
     if (isUncv()) { exportUncv(); return; }
     if (isDirectUncv()) { exportDirectUncv(); return; }
@@ -293,6 +304,10 @@ function renderDatasetTabs() {
     <button class="table-tab ${isUncv() ? 'active' : ''}" data-ds="__uncv" type="button">
       接例子未转化 ${Rec.uncvCount !== '' ? `<span class="tab-count">${fmtInt(Rec.uncvCount)}</span>` : ''}
     </button>` : '';
+  const lconvTab = perfDs && Rec.user.role === 'admin' ? `
+    <button class="table-tab ${isLconv() ? 'active' : ''}" data-ds="__lconv" type="button">
+      接leads已转化明细 ${Rec.lconvCount !== '' ? `<span class="tab-count">${fmtInt(Rec.lconvCount)}</span>` : ''}
+    </button>` : '';
   const ddetailTab = duncvDs ? `
     <button class="table-tab ${isDdetail() ? 'active' : ''}" data-ds="__ddetail" type="button">
       直推转化明细 ${Rec.ddetailCount !== '' ? `<span class="tab-count">${fmtInt(Rec.ddetailCount)}</span>` : ''}
@@ -305,7 +320,7 @@ function renderDatasetTabs() {
     <button class="table-tab ${isDragon() ? 'active' : ''}" data-ds="__dragon" type="button">龙珠奖</button>` : '';
   const rankTab = perfDs ? `
     <button class="table-tab ${isRank() ? 'active' : ''}" data-ds="__rank" type="button">业绩</button>` : '';
-  $('#datasetTabs').innerHTML = rankTab + tabs + uncvTab + ddetailTab + dmd2Tab + dragonTab;
+  $('#datasetTabs').innerHTML = rankTab + tabs + uncvTab + lconvTab + ddetailTab + dmd2Tab + dragonTab;
   $$('#datasetTabs [data-ds]').forEach((btn) => {
     btn.addEventListener('click', () => {
       Rec.dataset = btn.dataset.ds;
@@ -337,6 +352,7 @@ async function load() {
   writeUrl();
   if (isRank()) { toggleView('rank'); loadRankView(); return; }
   if (isUncv()) { toggleView('uncv'); await loadUncv(); return; }
+  if (isLconv()) { toggleView('lconv'); await loadLconv(); return; }
   if (isDdetail()) { toggleView('ddetail'); loadDdetail(); return; }
   if (isDmd2()) { toggleView('dmd2'); loadDmd2(); return; }
   if (isDirectUncv()) { toggleView('duncv'); await loadDirectUncv(); return; }
@@ -373,6 +389,8 @@ async function load() {
 function toggleView(mode) {
   $('#listCard').classList.toggle('hidden', mode !== 'list');
   $('#uncvCard').classList.toggle('hidden', mode !== 'uncv');
+  const lc = $('#lconvCard');
+  if (lc) lc.classList.toggle('hidden', mode !== 'lconv');
   const rk = $('#rankCard');
   if (rk) rk.classList.toggle('hidden', mode !== 'rank');
   const dd = $('#ddetailCard');
@@ -440,6 +458,7 @@ async function loadUncv() {
       Rec.uncvPerf = (await api(`/api/rankings?dataset=${perfDs.id}&range=all`)).perf;
       Rec.uncv.loaded = true;
       Rec.uncvCount = (Rec.uncvPerf.stats || {}).unconvertedCount || 0;
+      try { Rec.uncvReasons = ((await api('/api/uncv-reasons')) || {}).reasons || {}; } catch (e) { /* 原因加载失败不影响主表 */ }
       renderDatasetTabs();
     } catch (err) {
       card.innerHTML = `<div class="card-body"><div class="empty"><h3>加载失败</h3><p>${esc(err.message)}</p></div></div>`;
@@ -447,6 +466,33 @@ async function loadUncv() {
     }
   }
   renderUncv();
+}
+
+/** 填写未转化原因弹窗（按用户ID 持久化） */
+function openUncvReasonModal(userId) {
+  const cur = (Rec.uncvReasons || {})[userId] || null;
+  openModal({
+    title: '填写未转化原因',
+    subtitle: `用户ID：${userId}${cur ? ` · 最近填写：${cur.by} · ${cur.at}` : ''}`,
+    body: `
+      <div class="form-field"><label>未转化原因（留空保存即清除）</label>
+        <textarea class="control" id="uncvReasonText" rows="3" placeholder="例如：客户暂无预算 / 联系不上 / 已报竞品...">${esc(cur ? cur.text : '')}</textarea></div>`,
+    footer: `
+      <button class="btn" id="uncvReasonCancel" type="button">取消</button>
+      <button class="btn btn-primary" id="uncvReasonSave" type="button">保存</button>`,
+    onMount: (box) => {
+      box.querySelector('#uncvReasonCancel').addEventListener('click', closeModal);
+      box.querySelector('#uncvReasonSave').addEventListener('click', async () => {
+        try {
+          const r = await api('/api/uncv-reason', { method: 'POST', body: { userId, text: box.querySelector('#uncvReasonText').value } });
+          Rec.uncvReasons = r.reasons || {};
+          closeModal();
+          toast('未转化原因已保存', 'ok');
+          renderUncv();
+        } catch (err) { toast(err.message, 'err'); }
+      });
+    }
+  });
 }
 
 function renderUncv() {
@@ -459,7 +505,9 @@ function renderUncv() {
   const bases = [...new Set(all.map((r) => r.base || '').filter(Boolean))].sort();
   const baseOpts = '<option value="all">全部基地</option>' + bases.map((b) => `<option value="${esc(b)}" ${v.base === b ? 'selected' : ''}>${esc(b)}</option>`).join('');
 
-  const rowsHtml = shown.map((r) => `
+  const rowsHtml = shown.map((r) => {
+    const reason = (Rec.uncvReasons || {})[String(r.userId || '').trim()] || null;
+    return `
     <tr>
       <td class="num">${esc(r.time || r.month || '—')}</td>
       <td class="num">${esc(r.userId || '—')}</td>
@@ -468,7 +516,10 @@ function renderUncv() {
       <td class="num">${esc(r.empId || '—')}</td>
       <td class="num">${fmtCompact(r.amount || 0, 'money')}</td>
       <td>${r.refund ? '<span class="tag-refund">完全退款</span>' : '<span class="tag-sim">未转化</span>'}</td>
-    </tr>`).join('');
+      <td>${reason ? `<span class="text-sm">${esc(reason.text)}</span><div class="text-xs muted">${esc(reason.by)} · ${esc(reason.at)}</div>` : '<span class="muted">—</span>'}</td>
+      <td><button class="btn btn-sm" type="button" data-uncv-reason="${esc(r.userId || '')}">${reason ? '修改' : '填写'}</button></td>
+    </tr>`;
+  }).join('');
 
   $('#pageSubtitle').textContent = '接例子未转化 · leads 分配表为底表，用户ID 匹配订单池累计转化金额为 0 即未转化；完全退款单独标记';
   $('#uncvCard').innerHTML = `
@@ -501,8 +552,8 @@ function renderUncv() {
     </div>
     <div class="table-wrap" style="max-height:62vh">
       <table class="table">
-        <thead><tr><th>分配时间</th><th>用户ID</th><th>基地</th><th>CCid</th><th>绑定工号</th><th>累计转化金额</th><th>状态</th></tr></thead>
-        <tbody>${rowsHtml || `<tr><td colspan="7"><div class="empty"><h3>当前筛选条件下暂无未转化数据</h3><p>调整筛选条件后重试</p></div></td></tr>`}</tbody>
+        <thead><tr><th>分配时间</th><th>用户ID</th><th>基地</th><th>CCid</th><th>绑定工号</th><th>累计转化金额</th><th>状态</th><th>未转化原因</th><th></th></tr></thead>
+        <tbody>${rowsHtml || `<tr><td colspan="9"><div class="empty"><h3>当前筛选条件下暂无未转化数据</h3><p>调整筛选条件后重试</p></div></td></tr>`}</tbody>
       </table>
     </div>
     <div class="table-footer">
@@ -521,6 +572,9 @@ function renderUncv() {
   });
   const more = $('#uncvMore');
   if (more) more.addEventListener('click', () => { v.limit += 500; renderUncv(); });
+  $$('#uncvCard [data-uncv-reason]').forEach((btn) => {
+    btn.addEventListener('click', () => openUncvReasonModal(btn.dataset.uncvReason));
+  });
 }
 
 function exportUncv() {
@@ -532,9 +586,137 @@ function exportUncv() {
     { label: 'CCid', value: (r) => r.ccId || '' },
     { label: '绑定工号', value: (r) => r.empId || '' },
     { label: '累计转化金额', value: (r) => r.amount || 0 },
-    { label: '状态', value: (r) => (r.refund ? '完全退款' : '未转化') }
+    { label: '状态', value: (r) => (r.refund ? '完全退款' : '未转化') },
+    { label: '未转化原因', value: (r) => { const x = (Rec.uncvReasons || {})[String(r.userId || '').trim()]; return x ? x.text : ''; } }
   ]);
   toast(`已导出 ${rows.length} 条未转化名单`, 'ok');
+}
+
+/* ---------------- 接leads已转化明细（仅管理员可见，leads 命中订单池且累计转化金额>0） ---------------- */
+
+function lconvRows() {
+  const p = Rec.uncvPerf;
+  if (!p) return [];
+  return p.converted || [];
+}
+
+function lconvFiltered() {
+  const v = Rec.lconv;
+  const q = String(v.q || '').trim().toLowerCase();
+  const from = String(v.from || '').replace('T', ' ').trim();
+  const to = String(v.to || '').replace('T', ' ').trim();
+  return lconvRows().filter((r) => {
+    const t = String(r.time || r.month || '').replace('T', ' ');
+    if (from && (!t || t < from)) return false;
+    if (to && (!t || t > to)) return false;
+    if (v.base !== 'all' && (r.base || '') !== v.base) return false;
+    if (q && !`${r.userId} ${r.ccId} ${r.empId} ${r.base}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+async function loadLconv() {
+  const perfDs = perfDataset();
+  const card = $('#lconvCard');
+  if (!perfDs) {
+    card.innerHTML = '<div class="card-body"><div class="empty"><h3>暂无业绩底表</h3><p>接leads已转化明细需要先上传 leads 分配表与哥伦布订单池</p></div></div>';
+    return;
+  }
+  if (!Rec.uncv.loaded) {
+    card.innerHTML = '<div class="card-body"><div class="skeleton sk-line"></div></div>';
+    try {
+      const p = (await api(`/api/rankings?dataset=${perfDs.id}&range=all`)).perf;
+      Rec.uncvPerf = p;
+      Rec.uncv.loaded = true;
+      Rec.uncvCount = (p.stats || {}).unconvertedCount || 0;
+      Rec.lconvCount = (p.stats || {}).convertedCount || 0;
+      renderDatasetTabs();
+    } catch (err) {
+      card.innerHTML = `<div class="card-body"><div class="empty"><h3>加载失败</h3><p>${esc(err.message)}</p></div></div>`;
+      return;
+    }
+  }
+  renderLconv();
+}
+
+function renderLconv() {
+  const p = Rec.uncvPerf || {};
+  const st = p.stats || {};
+  const v = Rec.lconv;
+  const all = lconvRows();
+  const filtered = lconvFiltered();
+  const shown = filtered.slice(0, v.limit);
+  const bases = [...new Set(all.map((r) => r.base || '').filter(Boolean))].sort();
+  const baseOpts = '<option value="all">全部基地</option>' + bases.map((b) => `<option value="${esc(b)}" ${v.base === b ? 'selected' : ''}>${esc(b)}</option>`).join('');
+
+  const rowsHtml = shown.map((r) => `
+    <tr>
+      <td class="num">${esc(r.time || r.month || '—')}</td>
+      <td class="num">${esc(r.userId || '—')}</td>
+      <td>${esc(r.base || '未匹配')}</td>
+      <td class="cell-left">${esc(r.ccId || '—')}</td>
+      <td class="num">${esc(r.empId || '—')}</td>
+      <td class="num"><b>${fmtCompact(r.amount || 0, 'money')}</b></td>
+      <td>${r.refund ? '<span class="tag-refund">曾完全退款</span>' : '<span class="tag-done">已转化</span>'}</td>
+    </tr>`).join('');
+
+  $('#pageSubtitle').textContent = '接leads已转化明细 · 仅管理员可见：leads 分配表命中订单池且累计转化金额 > 0 的名单（与接例子未转化互斥）';
+  $('#lconvCard').innerHTML = `
+    <div class="card-body" style="border-bottom:1px solid var(--line)">
+      <div class="records-toolbar" style="margin-bottom:0">
+        <div class="field"><label>起止时间</label>
+          <div class="date-range">
+            <input class="control" id="lconvFrom" type="datetime-local" step="1" value="${esc(v.from)}">
+            <span class="range-sep">~</span>
+            <input class="control" id="lconvTo" type="datetime-local" step="1" value="${esc(v.to)}">
+          </div>
+        </div>
+        <div class="field"><label>基地</label>
+          <select class="control" id="lconvBase" style="width:120px">${baseOpts}</select>
+        </div>
+        <div class="field grow"><label>搜索</label>
+          <input class="control search" id="lconvSearch" placeholder="搜索用户ID / CCid / 工号 / 基地" value="${esc(v.q)}">
+        </div>
+        <div class="spacer"></div>
+        <span class="records-summary">已转化 <b>${fmtInt(st.convertedCount || 0)}</b> 条 · 累计金额 <b>${fmtCompact(st.convertedAmount || 0, 'money')}</b> · 当前展示 ${fmtInt(filtered.length)} 条</span>
+        <button class="btn btn-sm" id="lconvReset" type="button">重置</button>
+      </div>
+    </div>
+    <div class="table-wrap" style="max-height:62vh">
+      <table class="table">
+        <thead><tr><th>分配时间</th><th>用户ID</th><th>基地</th><th>CCid</th><th>绑定工号</th><th>累计转化金额</th><th>状态</th></tr></thead>
+        <tbody>${rowsHtml || `<tr><td colspan="7"><div class="empty"><h3>当前筛选条件下暂无已转化数据</h3><p>调整筛选条件后重试</p></div></td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="table-footer">
+      <span>${filtered.length > shown.length ? `已显示前 ${fmtInt(shown.length)} 条` : `共 ${fmtInt(filtered.length)} 条`}</span>
+      ${filtered.length > shown.length ? '<button class="btn btn-sm" id="lconvMore" type="button">显示更多</button>' : ''}
+    </div>`;
+
+  $('#lconvFrom').addEventListener('change', (e) => { v.from = e.target.value; v.limit = 200; renderLconv(); });
+  $('#lconvTo').addEventListener('change', (e) => { v.to = e.target.value; v.limit = 200; renderLconv(); });
+  $('#lconvBase').addEventListener('change', (e) => { v.base = e.target.value; v.limit = 200; renderLconv(); });
+  $('#lconvSearch').addEventListener('input', debounce((e) => { v.q = e.target.value; v.limit = 200; renderLconv(); }, 250));
+  $('#lconvReset').addEventListener('click', () => {
+    Rec.lconv = { from: '', to: '', base: 'all', q: '', limit: 200 };
+    renderLconv();
+  });
+  const more = $('#lconvMore');
+  if (more) more.addEventListener('click', () => { v.limit += 500; renderLconv(); });
+}
+
+function exportLconv() {
+  const rows = lconvFiltered();
+  downloadCsv('接leads已转化明细.csv', rows, [
+    { label: '分配时间', value: (r) => r.time || r.month || '' },
+    { label: '用户ID', value: (r) => r.userId || '' },
+    { label: '基地', value: (r) => r.base || '未匹配' },
+    { label: 'CCid', value: (r) => r.ccId || '' },
+    { label: '绑定工号', value: (r) => r.empId || '' },
+    { label: '累计转化金额', value: (r) => r.amount || 0 },
+    { label: '状态', value: (r) => (r.refund ? '曾完全退款' : '已转化') }
+  ]);
+  toast(`已导出 ${rows.length} 条已转化明细`, 'ok');
 }
 
 /* ---------------- 直推未转化视图（转介绍转化跟踪 · 跟进状态口径） ---------------- */
@@ -1211,8 +1393,7 @@ function renderTable() {
   $('#recordsSummary').textContent = `共 ${fmtInt(d.total)} 条`;
   $('#pageInfo').textContent = d.total ? `第 ${d.page} / ${d.pages} 页 · 每页 ${d.pageSize} 条` : '—';
   renderPager(d);
-  const kocBtns = $('#kocCfgBtns');
-  if (kocBtns) kocBtns.style.display = isKocDataset() && Rec.user.role === 'admin' ? '' : 'none';
+  // 2.12 KOC 分层配置按钮已迁移至后台「展示配置」（仅管理员）
 
   $$('#recordsTable [data-idx]').forEach((tr) => {
     tr.addEventListener('click', () => openDrawer(d.rows[Number(tr.dataset.idx)]));
@@ -1289,96 +1470,6 @@ function openDrawer(r) {
 function closeDrawer() {
   $('#drawerBackdrop').classList.remove('open');
   $('#drawer').classList.remove('open');
-}
-
-/* ---------------- KOC 分层设置（阈值 / 颜色，仅管理员） ---------------- */
-async function saveKocConfig(body) {
-  try {
-    const r = await api('/api/admin/koc-config', { method: 'POST', body: { datasetId: Rec.dataset, ...body } });
-    const ds = Rec.datasets.find((x) => x.id === Rec.dataset);
-    if (ds) ds.kocConfig = r.config;
-    closeModal();
-    load();
-    const summary = Object.entries(r.counts || {}).map(([k, v]) => `${k} ${fmtInt(v)}`).join(' · ');
-    toast(`已保存并重算：${summary}`, 'ok');
-  } catch (err) {
-    toast(err.message, 'err');
-  }
-}
-
-function openKocTierModal() {
-  if (Rec.user.role !== 'admin') return;
-  const cfg = kocCfg();
-  openModal({
-    title: '划分层级设置',
-    subtitle: '按「累计新正价用户数量」划分名单层级，保存后全表自动重算',
-    body: `
-      <div class="form-grid">
-        <div class="form-field"><label>最高层级阈值（累计新正价用户数量 ≥ 此值）</label>
-          <input class="control" id="kocT1" type="number" min="1" step="1" value="${cfg.t1}"></div>
-        <div class="form-field"><label>第二层阈值（≥ 此值且低于最高层级阈值）</label>
-          <input class="control" id="kocT2" type="number" min="0" step="1" value="${cfg.t2}"></div>
-      </div>
-      <div class="alert" style="margin-top:14px">
-        ${icon('info', 15)}
-        <div>分层规则：<b>最高层级</b> = 累计新正价 ≥ 最高阈值（如填 <b>10</b>，则累计新正价大于等于 10 的用户为最高层级）；<b>第二层</b> = 累计新正价 ≥ 第二阈值且未达最高层；<b>26年推荐成功</b> = 26年新正价 &gt; 0 且不在前两层；其余为<b>未入选</b>。重合备注 = 累计新正价 ≥ 第二阈值 且 26年新正价 &gt; 0。</div>
-      </div>`,
-    footer: `
-      <button class="btn" id="kocTierCancel" type="button">取消</button>
-      <button class="btn btn-primary" id="kocTierSave" type="button">保存并重算</button>`,
-    onMount: (box) => {
-      box.querySelector('#kocTierCancel').addEventListener('click', closeModal);
-      box.querySelector('#kocTierSave').addEventListener('click', () => {
-        const t1 = parseInt(box.querySelector('#kocT1').value, 10);
-        const t2 = parseInt(box.querySelector('#kocT2').value, 10);
-        if (!Number.isFinite(t1) || t1 < 1) { toast('最高层级阈值必须是不小于 1 的整数', 'err'); return; }
-        saveKocConfig({ t1, t2: Number.isFinite(t2) ? t2 : 0, colors: {} });
-      });
-    }
-  });
-}
-
-function openKocColorModal() {
-  if (Rec.user.role !== 'admin') return;
-  const cfg = kocCfg();
-  const items = [
-    ['t1', `最高层级（当前：历史累计≥${cfg.t1}）`, cfg.colors.t1],
-    ['t2', `第二层（当前：历史累计${cfg.t2}-${cfg.t1}）`, cfg.colors.t2],
-    ['t3', '26年推荐成功', cfg.colors.t3],
-    ['t4', '未入选', cfg.colors.t4]
-  ];
-  openModal({
-    title: '层级颜色设置',
-    subtitle: '为各 KOC 层级标签挑选颜色，保存后立即生效',
-    body: `
-      <div class="form-grid">
-        ${items.map(([k, label, hex]) => `
-          <div class="form-field"><label>${esc(label)}</label>
-            <div style="display:flex;align-items:center;gap:10px">
-              <input type="color" id="kocColor_${k}" value="${hex}" style="width:44px;height:34px;padding:2px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer">
-              <span class="mono text-sm muted">${hex}</span>
-            </div>
-          </div>`).join('')}
-      </div>
-      <div class="alert" style="margin-top:14px">
-        ${icon('info', 15)}
-        <div>标签底色与文字颜色会按所选颜色自动生成淡色样式。</div>
-      </div>`,
-    footer: `
-      <button class="btn" id="kocColorCancel" type="button">取消</button>
-      <button class="btn btn-primary" id="kocColorSave" type="button">保存颜色</button>`,
-    onMount: (box) => {
-      box.querySelector('#kocColorCancel').addEventListener('click', closeModal);
-      box.querySelector('#kocColorSave').addEventListener('click', () => {
-        const colors = {};
-        items.forEach(([k]) => {
-          const v = box.querySelector(`#kocColor_${k}`).value;
-          if (/^#[0-9a-fA-F]{6}$/.test(v)) colors[k] = v;
-        });
-        saveKocConfig({ t1: cfg.t1, t2: cfg.t2, colors });
-      });
-    }
-  });
 }
 
 /* =========================================================================

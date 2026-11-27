@@ -1295,3 +1295,6 @@ tr.org-mgr-row:hover td.strong { color: var(--violet); }
 
 /* ------------------------------------------------------------ 2.11 钻石兑换与使用明细切换按钮 */
 #dmd2BtnOrders, #dmd2BtnUsage { min-width: 108px; }
+
+/* ------------------------------------------------------------ 2.12 已转化标签 */
+.tag-done { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; background: #059669; color: #fff; border: 1px solid #047857; }
