@@ -1298,3 +1298,9 @@ tr.org-mgr-row:hover td.strong { color: var(--violet); }
 
 /* ------------------------------------------------------------ 2.12 已转化标签 */
 .tag-done { display: inline-block; padding: 2px 9px; border-radius: 999px; font-size: 12px; font-weight: 700; white-space: nowrap; background: #059669; color: #fff; border: 1px solid #047857; }
+
+/* ------------------------------------------------------------ 2.13 中台嵌入前台视图 */
+.front-embed {
+  display: block; width: 100%; height: calc(100vh - 150px); min-height: 640px;
+  border: 1px solid var(--line); border-radius: 14px; background: #fff;
+}

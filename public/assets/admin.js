@@ -28,6 +28,8 @@ const VIEW_META = {
   tutor: { title: '辅导架构', sub: '辅导老师归属关系管理，按基地 / 主管 / 层级 / 在职状态筛选查看', icon: 'users' },
   targets: { title: '业绩目标', sub: '高经团队目标与经理团队目标上传维护，用于直推业绩完成度计算', icon: 'target' },
   gjteam: { title: '高经归属', sub: '高经团队业绩的经理勾选映射与经理列 null 归属规则维护，调整后前台「高经团队」视图即时生效', icon: 'users' },
+  frontoverview: { title: '总览', sub: '与前台一致的经营总览（随底表数据实时更新），管理员视角查看全部基地', icon: 'eye' },
+  frontdata: { title: '明细数据', sub: '与前台明细数据页一致，管理员额外可见业绩榜单与接leads已转化明细等全部页签', icon: 'list' },
   settings: { title: '展示配置', sub: '前台标题、公告、KPI 与明细列开关，保存后立即生效', icon: 'sliders' },
   accounts: { title: '账号与权限', sub: '管理员维护数据与账号，基地账号只能查看本基地看板；含基地管理', icon: 'shield' },
   audit: { title: '操作日志', sub: '版本管理与切换、底表状态、操作留痕', icon: 'history' }
@@ -98,6 +100,8 @@ function go(view) {
     tutor: renderTutor,
     targets: renderTargets,
     gjteam: renderGjteamView,
+    frontoverview: () => renderFrontEmbed('frontoverview', '/'),
+    frontdata: () => renderFrontEmbed('frontdata', '/records'),
     settings: renderSettings,
     accounts: renderAccounts,
     audit: renderAudit
@@ -107,6 +111,16 @@ function go(view) {
 
 function toneBadge(tone) {
   return { blue: 'blue', violet: 'violet', green: 'green', amber: 'amber' }[tone] || '';
+}
+
+/* ---------------------------------------------------------------- 前台视图嵌入（总览 / 明细数据） */
+/** 懒加载嵌入前台页面；同域同登录态，管理员打开即为管理员视角（含业绩榜单、接leads已转化明细等页签）。
+ *  iframe 一经创建即保留，切换视图仅隐藏，回来不重新加载。 */
+function renderFrontEmbed(view, src) {
+  const host = $(`#view-${view}`);
+  if (!host || host.dataset.loaded) return;
+  host.innerHTML = `<iframe class="front-embed" src="${src}" title="${VIEW_META[view].title}"></iframe>`;
+  host.dataset.loaded = '1';
 }
 
 /* ---------------------------------------------------------------- 数据底表 */
