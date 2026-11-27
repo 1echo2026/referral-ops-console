@@ -402,3 +402,37 @@ function downloadCsv(filename, rows, headers) {
   a.click();
   URL.revokeObjectURL(a.href);
 }
+
+/* ---------------- 计算公式悬浮提示（hover 显示 / 移出隐藏，fixed 浮层避免被滚动容器裁剪） ---------------- */
+(function () {
+  let box = null;
+  function ensure() {
+    if (box) return box;
+    box = document.createElement('div');
+    box.id = 'fTipBox';
+    document.body.appendChild(box);
+    return box;
+  }
+  document.addEventListener('mouseover', (e) => {
+    const t = e.target && e.target.closest ? e.target.closest('.f-tip') : null;
+    if (!t) return;
+    const b = ensure();
+    b.textContent = t.dataset.f || '';
+    b.style.display = 'block';
+    b.style.left = '0px'; b.style.top = '0px';
+    const r = t.getBoundingClientRect();
+    const bw = b.offsetWidth, bh = b.offsetHeight;
+    let x = r.left + r.width / 2 - bw / 2;
+    x = Math.max(8, Math.min(x, window.innerWidth - bw - 8));
+    let y = r.top - bh - 8;
+    if (y < 8) y = r.bottom + 8;
+    b.style.left = x + 'px';
+    b.style.top = y + 'px';
+  });
+  document.addEventListener('mouseout', (e) => {
+    const t = e.target && e.target.closest ? e.target.closest('.f-tip') : null;
+    if (!t) return;
+    if (box) box.style.display = 'none';
+  });
+  document.addEventListener('scroll', () => { if (box) box.style.display = 'none'; }, true);
+})();

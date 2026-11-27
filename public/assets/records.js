@@ -45,11 +45,14 @@ const Rec = {
   dragon: { board: 'A', period: '', me: '' },
   dragonData: null, dragonCount: '',
   gjteam: { base: '', gj: '', panelOpen: false, picked: [], includeSelf: false },
-  gjteamData: null
+  gjteamData: null,
+  dmd2: { mode: 'orders' },
+  ddetail: { from: '', to: '', base: 'all', q: '', limit: 300 },
+  ddetailData: null, ddetailCount: ''
 };
 
-// 明细名单页隐藏的底表页签（业绩相关 + 已被专项视图替代的钻石底表）
-const HIDDEN_TAB_DATASETS = ['ds_deal', 'ds_youshu', 'ds_diamond'];
+// 明细数据页隐藏的底表页签（业绩相关 + 质检台账/转介绍转化跟踪已下线展示）
+const HIDDEN_TAB_DATASETS = ['ds_deal', 'ds_youshu', 'ds_diamond', 'ds_qc', 'ds_direct'];
 
 // 业绩底表 id（接例子未转化数据来源）
 function perfDataset() {
@@ -69,6 +72,9 @@ function isDiamond() { return Rec.dataset === '__diamond'; }
 function isDiamondOrders() { return Rec.dataset === '__dmd'; }
 function isDragon() { return Rec.dataset === '__dragon'; }
 function isGjteam() { return Rec.dataset === '__gjteam'; }
+function isRank() { return Rec.dataset === '__rank'; }
+function isDmd2() { return Rec.dataset === '__dmd2'; }
+function isDdetail() { return Rec.dataset === '__ddetail'; }
 
 function highDataset() { return Rec.datasets.find((d) => d.id === 'ds_high') || null; }
 function diamondDataset() { return Rec.datasets.find((d) => d.id === 'ds_diamond') || null; }
@@ -92,17 +98,21 @@ async function recordsBoot() {
   if (!isBase) $('#adminLink').classList.remove('hidden');
   if (isBase) $('#baseField').classList.add('hidden');
 
-  // URL 参数：dataset / base / status / q / from / to
+  // URL 参数：dataset / base / status / q / from / to（旧页签键重定向到新页签）
   const h = new URLSearchParams(location.search);
   if (h.get('dataset') === '__uncv' && perfDataset()) Rec.dataset = '__uncv';
-  else if (h.get('dataset') === '__duncv' && directUncvDataset()) Rec.dataset = '__duncv';
-  else if (h.get('dataset') === '__chain' && directUncvDataset()) Rec.dataset = '__chain';
-  else if (h.get('dataset') === '__ktier' && highDataset()) Rec.dataset = '__ktier';
-  else if (h.get('dataset') === '__diamond' && diamondDataset()) Rec.dataset = '__diamond';
-  else if (h.get('dataset') === '__dmd' && diamondDataset()) Rec.dataset = '__dmd';
+  else if (h.get('dataset') === '__duncv' && directUncvDataset()) Rec.dataset = '__ddetail';
+  else if (h.get('dataset') === '__ddetail' && directUncvDataset()) Rec.dataset = '__ddetail';
+  else if (h.get('dataset') === '__chain' && directUncvDataset()) Rec.dataset = '__ddetail';
+  else if (h.get('dataset') === '__ktier' && highDataset()) Rec.dataset = '__rank';
+  else if (h.get('dataset') === '__diamond' && diamondDataset()) Rec.dataset = '__dmd2';
+  else if (h.get('dataset') === '__dmd' && diamondDataset()) Rec.dataset = '__dmd2';
+  else if (h.get('dataset') === '__dmd2' && diamondDataset()) Rec.dataset = '__dmd2';
   else if (h.get('dataset') === '__dragon' && perfDataset()) Rec.dataset = '__dragon';
-  else if (h.get('dataset') === '__gjteam' && perfDataset()) Rec.dataset = '__gjteam';
+  else if (h.get('dataset') === '__gjteam' && perfDataset()) Rec.dataset = '__rank';
+  else if (h.get('dataset') === '__rank' && perfDataset()) Rec.dataset = '__rank';
   else if (h.get('dataset') && Rec.datasets.some((d) => d.id === h.get('dataset') && !HIDDEN_TAB_DATASETS.includes(d.id))) Rec.dataset = h.get('dataset');
+  else if (perfDataset() && !h.get('base') && !h.get('status') && !h.get('q') && !h.get('from') && !h.get('to')) Rec.dataset = '__rank';
   else Rec.dataset = ((Rec.datasets.find((d) => !HIDDEN_TAB_DATASETS.includes(d.id))) || Rec.datasets[0] || {}).id || '';
   if (!isBase && h.get('base')) Rec.base = h.get('base');
   if (h.get('status')) Rec.status = h.get('status');
@@ -122,6 +132,20 @@ async function recordsBoot() {
   $('#statusFilter').addEventListener('change', (e) => { Rec.status = e.target.value; Rec.page = 1; load(); writeUrl(); });
   $('#searchInput').addEventListener('input', debounce(() => { Rec.q = $('#searchInput').value.trim(); Rec.page = 1; load(); }, 300));
   $('#resetBtn').addEventListener('click', () => {
+    if (isRank()) {
+      $('#resetFilters').click();
+      return;
+    }
+    if (isDdetail()) {
+      Rec.ddetail = { from: '', to: '', base: 'all', q: '', limit: 300 };
+      renderDdetail();
+      return;
+    }
+    if (isDmd2()) {
+      if (Rec.dmd2.mode === 'orders') { Rec.dmd = { from: '', to: '', base: 'all', q: '', limit: 200 }; renderDiamondOrders(); }
+      else { Rec.diamond = { state: 'all', base: 'all', q: '', limit: 200, sort: 'grant' }; renderDiamond(); }
+      return;
+    }
     if (isUncv()) {
       Rec.uncv = { from: '', to: '', base: 'all', refund: 'all', q: '', limit: 200, loaded: Rec.uncv.loaded };
       loadUncv();
@@ -169,6 +193,9 @@ async function recordsBoot() {
     load();
   });
   $('#exportBtn').addEventListener('click', () => {
+    if (isRank()) { exportRank(); return; }
+    if (isDdetail()) { exportDdetail(); return; }
+    if (isDmd2()) { if (Rec.dmd2.mode === 'orders') exportDiamondOrders(); else exportDiamond(); return; }
     if (isUncv()) { exportUncv(); return; }
     if (isDirectUncv()) { exportDirectUncv(); return; }
     if (isChain()) { exportChain(); return; }
@@ -187,25 +214,14 @@ async function recordsBoot() {
   $('#drawerBackdrop').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeDrawer(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
 
-  // KOC 分层设置按钮（仅管理员 + KOC 底表时显示）
-  if (Rec.user.role === 'admin') {
-    const toolbar = document.querySelector('.records-toolbar');
-    const reset = $('#resetBtn');
-    if (toolbar && reset) {
-      const wrap = document.createElement('span');
-      wrap.id = 'kocCfgBtns';
-      wrap.style.display = 'none';
-      wrap.innerHTML = `
-        <button class="btn btn-sm" id="kocTierBtn" type="button">${icon('layers', 13)}划分层级</button>
-        <button class="btn btn-sm" id="kocColorBtn" type="button">${icon('spark', 13)}层级颜色</button>`;
-      toolbar.insertBefore(wrap, reset);
-      $('#kocTierBtn').addEventListener('click', openKocTierModal);
-      $('#kocColorBtn').addEventListener('click', openKocColorModal);
-    }
-  }
+  // 钻石兑换与使用明细：两个模式按钮
+  const bO = $('#dmd2BtnOrders');
+  const bU = $('#dmd2BtnUsage');
+  if (bO) bO.addEventListener('click', () => { Rec.dmd2.mode = 'orders'; renderDmd2(); loadDiamondOrders(); });
+  if (bU) bU.addEventListener('click', () => { Rec.dmd2.mode = 'usage'; renderDmd2(); loadDiamond(); });
 
-  if (directUncvDataset()) { prefetchDuncv(); prefetchChain(); }
-  if (highDataset()) prefetchKtier();
+  // KOC 三类分层页签已下线，分层配置按钮一并移除
+
   if (diamondDataset()) { prefetchDiamond(); prefetchDiamondOrders(); }
   if (perfDataset()) prefetchDragon();
   load();
@@ -277,31 +293,19 @@ function renderDatasetTabs() {
     <button class="table-tab ${isUncv() ? 'active' : ''}" data-ds="__uncv" type="button">
       接例子未转化 ${Rec.uncvCount !== '' ? `<span class="tab-count">${fmtInt(Rec.uncvCount)}</span>` : ''}
     </button>` : '';
-  const duncvTab = duncvDs ? `
-    <button class="table-tab ${isDirectUncv() ? 'active' : ''}" data-ds="__duncv" type="button">
-      直推未转化 ${Rec.duncvCount !== '' ? `<span class="tab-count">${fmtInt(Rec.duncvCount)}</span>` : ''}
+  const ddetailTab = duncvDs ? `
+    <button class="table-tab ${isDdetail() ? 'active' : ''}" data-ds="__ddetail" type="button">
+      直推转化明细 ${Rec.ddetailCount !== '' ? `<span class="tab-count">${fmtInt(Rec.ddetailCount)}</span>` : ''}
     </button>` : '';
-  const chainTab = duncvDs ? `
-    <button class="table-tab ${isChain() ? 'active' : ''}" data-ds="__chain" type="button">
-      ABC 链路分析 ${Rec.chainCount !== '' ? `<span class="tab-count">${fmtInt(Rec.chainCount)}</span>` : ''}
+  const dmd2Tab = diamondDataset() ? `
+    <button class="table-tab ${isDmd2() ? 'active' : ''}" data-ds="__dmd2" type="button">
+      钻石兑换与使用明细 ${Rec.dmdCount !== '' ? `<span class="tab-count">${fmtInt(Rec.dmdCount)}</span>` : ''}
     </button>` : '';
-  const ktierTab = highDataset() ? `
-    <button class="table-tab ${isKtier() ? 'active' : ''}" data-ds="__ktier" type="button">
-      KOC 三类分层 ${Rec.ktierCount !== '' ? `<span class="tab-count">${fmtInt(Rec.ktierCount)}</span>` : ''}
-    </button>` : '';
-  const diamondTab = diamondDataset() ? `
-    <button class="table-tab ${isDiamond() ? 'active' : ''}" data-ds="__diamond" type="button">
-      钻石未使用 ${Rec.diamondCount !== '' ? `<span class="tab-count">${fmtInt(Rec.diamondCount)}</span>` : ''}
-    </button>` : '';
-  const dmdTab = diamondDataset() ? `
-    <button class="table-tab ${isDiamondOrders() ? 'active' : ''}" data-ds="__dmd" type="button">
-      钻石兑换明细 ${Rec.dmdCount !== '' ? `<span class="tab-count">${fmtInt(Rec.dmdCount)}</span>` : ''}
-    </button>` : '';
-  const dragonTab = perfDataset() ? `
+  const dragonTab = perfDs ? `
     <button class="table-tab ${isDragon() ? 'active' : ''}" data-ds="__dragon" type="button">龙珠奖</button>` : '';
-  const gjteamTab = perfDataset() ? `
-    <button class="table-tab ${isGjteam() ? 'active' : ''}" data-ds="__gjteam" type="button">高经团队</button>` : '';
-  $('#datasetTabs').innerHTML = tabs + uncvTab + duncvTab + chainTab + ktierTab + diamondTab + dmdTab + dragonTab + gjteamTab;
+  const rankTab = perfDs ? `
+    <button class="table-tab ${isRank() ? 'active' : ''}" data-ds="__rank" type="button">业绩</button>` : '';
+  $('#datasetTabs').innerHTML = rankTab + tabs + uncvTab + ddetailTab + dmd2Tab + dragonTab;
   $$('#datasetTabs [data-ds]').forEach((btn) => {
     btn.addEventListener('click', () => {
       Rec.dataset = btn.dataset.ds;
@@ -331,7 +335,10 @@ function writeUrl() {
 
 async function load() {
   writeUrl();
+  if (isRank()) { toggleView('rank'); loadRankView(); return; }
   if (isUncv()) { toggleView('uncv'); await loadUncv(); return; }
+  if (isDdetail()) { toggleView('ddetail'); loadDdetail(); return; }
+  if (isDmd2()) { toggleView('dmd2'); loadDmd2(); return; }
   if (isDirectUncv()) { toggleView('duncv'); await loadDirectUncv(); return; }
   if (isChain()) { toggleView('chain'); await loadChain(); return; }
   if (isKtier()) { toggleView('ktier'); loadKtier(); return; }
@@ -366,16 +373,18 @@ async function load() {
 function toggleView(mode) {
   $('#listCard').classList.toggle('hidden', mode !== 'list');
   $('#uncvCard').classList.toggle('hidden', mode !== 'uncv');
+  const rk = $('#rankCard');
+  if (rk) rk.classList.toggle('hidden', mode !== 'rank');
+  const dd = $('#ddetailCard');
+  if (dd) dd.classList.toggle('hidden', mode !== 'ddetail');
+  const d2 = $('#dmd2Card');
+  if (d2) d2.classList.toggle('hidden', mode !== 'dmd2');
   const d = $('#duncvCard');
   if (d) d.classList.toggle('hidden', mode !== 'duncv');
   const cc = $('#chainCard');
   if (cc) cc.classList.toggle('hidden', mode !== 'chain');
   const kt = $('#ktierCard');
   if (kt) kt.classList.toggle('hidden', mode !== 'ktier');
-  const dm = $('#diamondCard');
-  if (dm) dm.classList.toggle('hidden', mode !== 'diamond');
-  const dmd = $('#dmdCard');
-  if (dmd) dmd.classList.toggle('hidden', mode !== 'dmd');
   const dg = $('#dragonCard');
   if (dg) dg.classList.toggle('hidden', mode !== 'dragon');
   const gjt = $('#gjteamCard');
@@ -1551,6 +1560,200 @@ function exportKtier() {
 }
 
 /* =========================================================================
+   业绩页签（原业绩排行页并入）：由 rankings.js 提供 initRankings / Rank.load
+   ========================================================================= */
+
+let rankInited = false;
+
+function loadRankView() {
+  const card = $('#rankCard');
+  if (!card) return;
+  if (!perfDataset()) {
+    card.innerHTML = '<div class="card-body"><div class="empty"><h3>暂无业绩底表</h3><p>业绩榜单需要先在后台上传有数业绩完成度等业绩底表</p></div></div>';
+    return;
+  }
+  $('#pageSubtitle').textContent = '业绩榜单 · 高经 / 经理 / 销售三榜 · 按取数逻辑实时计算；鼠标悬停数字可查看计算公式，移开即隐藏';
+  if (!rankInited) {
+    rankInited = true;
+    initRankings({ user: Rec.user, datasets: Rec.datasets, settings: Rec.settings });
+  } else {
+    loadRank();
+  }
+}
+
+/* =========================================================================
+   钻石兑换与使用明细（合并页签）：兑换名明细 / 钻石使用明细 两个按钮切换
+   ========================================================================= */
+
+function loadDmd2() {
+  $('#pageSubtitle').textContent = '钻石兑换与使用明细 · 「兑换名明细」=已转化订单与应发放钻石；「钻石使用明细」=老用户钻石发放/消耗/剩余（解冻：正价课满30天未退）';
+  renderDmd2();
+  if (Rec.dmd2.mode === 'orders') loadDiamondOrders();
+  else loadDiamond();
+}
+
+function renderDmd2() {
+  const ordersBtn = $('#dmd2BtnOrders');
+  const usageBtn = $('#dmd2BtnUsage');
+  const p1 = $('#dmdPanel');
+  const p2 = $('#diamondPanel');
+  if (!ordersBtn) return;
+  const mode = Rec.dmd2.mode;
+  ordersBtn.classList.toggle('btn-primary', mode === 'orders');
+  usageBtn.classList.toggle('btn-primary', mode === 'usage');
+  if (p1) p1.style.display = mode === 'orders' ? 'block' : 'none';
+  if (p2) p2.style.display = mode === 'usage' ? 'block' : 'none';
+  const src = (mode === 'orders' ? (Rec.dmdData || {}).summary : (Rec.diamondData || {}).summary) || {};
+  const sub = $('#dmd2Sub');
+  if (sub) {
+    sub.innerHTML = mode === 'orders'
+      ? `兑换名明细 · 转化订单 <b>${fmtInt(src.orders || 0)}</b> 笔 · 转化金额合计 <b>${fmtMoney(src.amount || 0)}</b> · 销售 <b>${fmtInt(src.emps || 0)}</b> 人`
+      : `钻石使用明细 · 未消耗 <b style="color:#b45309">${fmtInt(src.unused || 0)}</b> · 部分消耗 ${fmtInt(src.partial || 0)} · 剩余钻石 <b>${fmtInt(src.restTotal || 0)}</b>`;
+  }
+}
+
+/* =========================================================================
+   直推转化明细（原直推未转化页签）：转介绍转化跟踪全量行
+   表头：序号/转介绍日期/高经/经理/主管/组长/销售姓名/工号/A/B/C/活动id/转化年级/转化金额
+   ========================================================================= */
+
+function loadDdetail() {
+  const card = $('#ddetailCard');
+  if (!card) return;
+  if (!Rec.ddetailData) {
+    card.innerHTML = '<div class="card-body"><div class="skeleton sk-line"></div></div>';
+    api('/api/direct-detail').then((d) => {
+      Rec.ddetailData = d;
+      Rec.ddetailCount = (d.summary || {}).total || 0;
+      renderDatasetTabs();
+      renderDdetail();
+    })
+      .catch((err) => { card.innerHTML = `<div class="card-body"><div class="empty"><h3>加载失败</h3><p>${esc(err.message)}</p></div></div>`; });
+    return;
+  }
+  renderDdetail();
+}
+
+function ddetailRows() {
+  const d = Rec.ddetailData;
+  if (!d) return [];
+  let rows = d.rows || [];
+  if (Rec.user.role === 'base' && Rec.user.baseName) {
+    const norm = (x) => String(x || '').trim().replace(/基地$/, '');
+    const mine = norm(Rec.user.baseName);
+    rows = rows.filter((r) => norm(r.base) === mine);
+  }
+  return rows;
+}
+
+function ddetailFiltered() {
+  const v = Rec.ddetail;
+  const q = String(v.q || '').trim().toLowerCase();
+  const from = String(v.from || '').trim();
+  const to = String(v.to || '').trim();
+  return ddetailRows().filter((r) => {
+    const t = String(r.introDate || '').slice(0, 10);
+    if (from && t && t < from) return false;
+    if (to && t && t > to) return false;
+    if (v.base !== 'all' && (r.base || '') !== v.base) return false;
+    if (q && !`${r.empName} ${r.empId} ${r.gj} ${r.jl} ${r.zg} ${r.zz} ${r.a} ${r.b} ${r.c} ${r.activityId} ${r.grade} ${r.base}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function renderDdetail() {
+  const card = $('#ddetailCard');
+  if (!card) return;
+  const v = Rec.ddetail;
+  const src = Rec.ddetailData || {};
+  const sum = src.summary || {};
+  const all = ddetailRows();
+  const filtered = ddetailFiltered();
+  const shown = filtered.slice(0, v.limit);
+  const bases = [...new Set(all.map((r) => r.base || '').filter(Boolean))].sort();
+  const baseOpts = '<option value="all">全部基地</option>' + bases.map((b) => `<option value="${esc(b)}" ${v.base === b ? 'selected' : ''}>${esc(b)}</option>`).join('');
+
+  $('#pageSubtitle').textContent = '直推转化明细 · 转介绍转化跟踪全量明细（按转介绍日期倒序）；转化金额>0 即已转化';
+
+  const listRows = shown.map((r) => `<tr>
+      <td class="num muted">${r.seq}</td>
+      <td class="num nowrap">${esc(r.introDate || '—')}</td>
+      <td>${esc(r.gj || '—')}</td>
+      <td>${esc(r.jl || '—')}</td>
+      <td>${esc(r.zg || '—')}</td>
+      <td>${esc(r.zz || '—')}</td>
+      <td class="strong">${esc(r.empName || '—')}</td>
+      <td class="num">${esc(r.empId || '—')}</td>
+      <td class="num text-sm muted" style="max-width:150px;word-break:break-all">${esc(r.a || '—')}</td>
+      <td class="num text-sm muted" style="max-width:150px;word-break:break-all">${esc(r.b || '—')}</td>
+      <td class="num text-sm muted" style="max-width:150px;word-break:break-all">${esc(r.c || '—')}</td>
+      <td class="num text-sm">${esc(r.activityId || '—')}</td>
+      <td>${esc(r.grade || '—')}</td>
+      <td class="num nowrap">${r.amount > 0 ? `<b>${fmtMoney(r.amount)}</b>` : '<span class="muted">—</span>'}</td>
+    </tr>`).join('');
+
+  card.innerHTML = `
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+      <div><h3>直推转化明细</h3><p class="records-summary">明细 <b>${fmtInt(sum.total || 0)}</b> 条 · 已转化 <b>${fmtInt(sum.converted || 0)}</b> 条 · 转化金额合计 <b>${fmtMoney(sum.amount || 0)}</b></p></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" id="ddReset" type="button">${icon('rotate', 13)} 重置</button>
+        <button class="btn btn-sm" id="ddExport" type="button">${icon('download', 13)} 导出</button>
+      </div>
+    </div>
+    <div class="card-body records-toolbar" style="border-bottom:1px solid var(--line)">
+      <div class="field"><label>转介绍日期</label>
+        <div class="date-range" style="display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:8px;padding:2px 6px;background:var(--surface)">
+          <input class="control" id="ddFrom" type="date" value="${esc(String(v.from).slice(0, 10))}" style="width:135px;border:none;background:transparent">
+          <span class="muted">~</span>
+          <input class="control" id="ddTo" type="date" value="${esc(String(v.to).slice(0, 10))}" style="width:135px;border:none;background:transparent">
+        </div>
+      </div>
+      <div class="field"><label>基地</label>
+        <select class="control" id="ddBase" style="width:130px">${baseOpts}</select>
+      </div>
+      <div class="field grow"><label>搜索</label>
+        <input class="control search" id="ddSearch" placeholder="姓名 / 工号 / 高经 / 经理 / A·B·C / 活动id" value="${esc(v.q)}">
+      </div>
+    </div>
+    <div class="card-body" style="padding:0">
+      <table class="table">
+        <thead><tr><th>序号</th><th>转介绍日期</th><th>高经</th><th>经理</th><th>主管</th><th>组长</th><th>销售姓名</th><th>工号</th><th>A</th><th>B</th><th>C</th><th>活动id</th><th>转化年级</th><th>转化金额</th></tr></thead>
+        <tbody>${listRows || '<tr><td colspan="14"><div class="empty"><h3>当前筛选条件下暂无数据</h3></div></td></tr>'}</tbody>
+      </table>
+      <div class="table-footer"><span>共 ${fmtInt(filtered.length)} 条${filtered.length > shown.length ? ` · 显示前 ${fmtInt(shown.length)} 条` : ''} · 按转介绍日期倒序 · 转化金额>0 即已转化</span></div>
+    </div>`;
+
+  const bind = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  bind('#ddFrom', 'change', () => { v.from = $('#ddFrom').value; renderDdetail(); });
+  bind('#ddTo', 'change', () => { v.to = $('#ddTo').value; renderDdetail(); });
+  bind('#ddBase', 'change', (e) => { v.base = e.target.value; renderDdetail(); });
+  bind('#ddSearch', 'input', debounce(() => { v.q = $('#ddSearch').value.trim(); renderDdetail(); }, 300));
+  bind('#ddReset', 'click', () => { Rec.ddetail = { from: '', to: '', base: 'all', q: '', limit: 300 }; renderDdetail(); });
+  bind('#ddExport', 'click', exportDdetail);
+}
+
+function exportDdetail() {
+  const rows = ddetailFiltered();
+  downloadCsv('直推转化明细.csv', rows, [
+    { label: '序号', value: (r) => r.seq },
+    { label: '转介绍日期', value: (r) => r.introDate },
+    { label: '高经', value: (r) => r.gj },
+    { label: '经理', value: (r) => r.jl },
+    { label: '主管', value: (r) => r.zg },
+    { label: '组长', value: (r) => r.zz },
+    { label: '销售姓名', value: (r) => r.empName },
+    { label: '工号', value: (r) => r.empId },
+    { label: 'A', value: (r) => r.a },
+    { label: 'B', value: (r) => r.b },
+    { label: 'C', value: (r) => r.c },
+    { label: '活动id', value: (r) => r.activityId },
+    { label: '转化年级', value: (r) => r.grade },
+    { label: '转化金额', value: (r) => r.amount }
+  ]);
+  toast(`已导出 ${rows.length} 条直推转化明细`, 'ok');
+}
+
+/* =========================================================================
    2.7 钻石未使用视图
    ========================================================================= */
 
@@ -1586,7 +1789,7 @@ function diamondStateTag(s) {
 }
 
 function loadDiamond() {
-  const card = $('#diamondCard');
+  const card = $('#diamondPanel');
   if (!card) return;
   if (!Rec.diamondData) {
     card.innerHTML = '<div class="card-body"><div class="skeleton sk-line"></div></div>';
@@ -1598,7 +1801,7 @@ function loadDiamond() {
 }
 
 function renderDiamond() {
-  const card = $('#diamondCard');
+  const card = $('#diamondPanel');
   if (!card) return;
   const v = Rec.diamond;
   const src = Rec.diamondData || {};
@@ -2031,7 +2234,7 @@ function dmdFiltered() {
 }
 
 function loadDiamondOrders() {
-  const card = $('#dmdCard');
+  const card = $('#dmdPanel');
   if (!card) return;
   if (!Rec.dmdData) {
     card.innerHTML = '<div class="card-body"><div class="skeleton sk-line"></div></div>';
@@ -2043,7 +2246,7 @@ function loadDiamondOrders() {
 }
 
 function renderDiamondOrders() {
-  const card = $('#dmdCard');
+  const card = $('#dmdPanel');
   if (!card) return;
   const v = Rec.dmd;
   const src = Rec.dmdData || {};

@@ -22,9 +22,7 @@
     </a>
     <nav class="site-nav" aria-label="主导航">
       <a class="nav-link" href="/">总览</a>
-      <a class="nav-link" href="/tables">专项明细</a>
-      <a class="nav-link" href="/rankings">业绩排行</a>
-      <a class="nav-link active" href="/records">明细名单</a>
+      <a class="nav-link active" href="/records">明细数据</a>
     </nav>
     <div class="header-user">
       <span class="meta-chip" id="viewerChip">—</span>
@@ -37,7 +35,7 @@
 <main class="page">
   <div class="page-head">
     <div>
-      <h1 class="page-title">明细名单</h1>
+      <h1 class="page-title">明细数据</h1>
       <p class="page-sub" id="pageSubtitle">搜索、筛选并查看每一条名单明细；姓名与手机号已脱敏</p>
     </div>
     <div class="head-meta">
@@ -86,11 +84,81 @@
 
   <section class="card hidden" id="duncvCard" style="overflow:hidden"></section>
   <section class="card hidden" id="chainCard" style="overflow:hidden"></section>
-  <section class="card hidden" id="ktierCard" style="overflow:hidden"></section>
-  <section class="card hidden" id="diamondCard" style="overflow:hidden"></section>
-  <section class="card hidden" id="dmdCard" style="overflow:hidden"></section>
+
+  <section class="card hidden" id="dmd2Card" style="overflow:hidden">
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+      <div><h3>钻石兑换与使用明细</h3><p class="records-summary" id="dmd2Sub">—</p></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" id="dmd2BtnOrders" type="button">兑换名明细</button>
+        <button class="btn btn-sm" id="dmd2BtnUsage" type="button">钻石使用明细</button>
+      </div>
+    </div>
+    <div id="dmdPanel" style="display:none;overflow:hidden"></div>
+    <div id="diamondPanel" style="display:none;overflow:hidden"></div>
+  </section>
+
+  <section class="card hidden" id="ddetailCard" style="overflow:hidden"></section>
+
+  <section class="card hidden" id="rankCard" style="overflow:hidden">
+    <div class="card-body" style="border-bottom:1px solid var(--line)">
+      <div class="filter-bar records-toolbar" style="padding:0;margin:0;background:transparent;border:none;box-shadow:none">
+        <div class="field">
+          <label>数据类别</label>
+          <select class="control" id="datasetFilter" style="min-width:180px"></select>
+        </div>
+        <div class="field">
+          <label>时间</label>
+          <select class="control" id="rangeFilter">
+            <option value="all">全部时间</option>
+            <option value="30">近 30 天</option>
+            <option value="90">近 90 天</option>
+            <option value="month">本月</option>
+            <option value="custom">自定义</option>
+          </select>
+        </div>
+        <div class="field hidden" id="fromField">
+          <input class="control" type="date" id="fromFilter">
+        </div>
+        <div class="field hidden" id="toField">
+          <input class="control" type="date" id="toFilter">
+        </div>
+        <div class="spacer"></div>
+        <button class="btn btn-sm" id="resetFilters" type="button">重置</button>
+      </div>
+    </div>
+    <div class="card-body" style="padding-top:12px">
+      <div class="rank-summary" id="rankSummary">
+        <div class="skeleton" style="height:96px"></div>
+        <div class="skeleton" style="height:96px"></div>
+        <div class="skeleton" style="height:96px"></div>
+      </div>
+    </div>
+    <div class="table-tabs" id="rankTabs" style="padding:0 16px"></div>
+    <div class="rank-card" id="stdCard" style="border:none;box-shadow:none">
+      <div class="rank-titlebar">
+        <div>
+          <div class="rank-title" id="rankTitle">—</div>
+          <div class="rank-sub" id="rankSub">—</div>
+        </div>
+        <div class="rank-actions">
+          <button class="btn btn-sm" id="copyRank" type="button">复制表格</button>
+          <button class="btn btn-sm" id="exportRank" type="button">导出 CSV</button>
+          <button class="btn btn-sm hidden" id="editNote" type="button">编辑备注</button>
+        </div>
+      </div>
+      <div class="rank-note hidden" id="rankNote"></div>
+      <div class="sheet-scroll">
+        <table class="rank-table" id="rankTable">
+          <thead id="rankHead"></thead>
+          <tbody id="rankBody"><tr><td><div class="skeleton skeleton-line"></div></td></tr></tbody>
+        </table>
+      </div>
+      <div class="sheet-foot" id="rankFoot">—</div>
+    </div>
+    <div class="rank-card hidden" id="perfCard"></div>
+  </section>
+
   <section class="card hidden" id="dragonCard" style="overflow:hidden"></section>
-  <section class="card hidden" id="gjteamCard" style="overflow:hidden"></section>
 
   <footer class="page-foot">
     <div>明细数据来源于已上传底表 · 前台只读 · 完整信息请进入后台查看</div>
@@ -111,6 +179,7 @@
 </div>
 
 <script src="/assets/ui.js"></script>
+<script src="/assets/rankings.js"></script>
 <script src="/assets/records.js"></script>
 </body>
 </html>

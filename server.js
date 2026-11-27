@@ -757,7 +757,9 @@ function buildPerfReport(ds) {
   const frontline = Object.values(byEmp)
     .map((e) => {
       const org = orgByEmp[String(e.empId || '').toUpperCase()];
-      return { base: e.base, name: e.name, empId: e.empId, teamName: org ? (org.teamName || '') : '', total: Math.round(e.total * 100) / 100, byMonth: e.byMonth };
+      // 所属高经团队：本人是高经取自己，否则取架构高经列（managerName）
+      const gjName = org ? (org.level === '高经' ? org.name : (org.managerName || '')) : '';
+      return { base: e.base, name: e.name, empId: e.empId, teamName: org ? (org.teamName || '') : '', gjName, total: Math.round(e.total * 100) / 100, byMonth: e.byMonth };
     })
     .sort((a, b) => b.total - a.total);
   // 2.1 当月名次：同分并列、不跳号（密排名次：1,2,2,3）
@@ -1886,10 +1888,11 @@ function serveStatic(req, res, pathname) {
   const pages = {
     '/login': '/login.html',
     '/admin': '/admin.html',
-    '/records': '/records.html',
-    '/rankings': '/rankings.html',
-    '/tables': '/tables.html'
+    '/records': '/records.html'
   };
+  // 专项明细 / 业绩排行 已并入明细数据页，旧链接 302 重定向
+  if (rel === '/tables') { res.writeHead(302, { location: '/records' }); res.end(); return; }
+  if (rel === '/rankings') { res.writeHead(302, { location: '/records?dataset=__rank' }); res.end(); return; }
   // 后台页服务端直接做角色分流：未登录去登录页，基地账号回前台（避免先渲染后台再跳转的闪烁）
   if (rel === '/admin') {
     const u = currentUser(req);
@@ -2330,6 +2333,40 @@ async function handleApi(req, res, url) {
       if (mine) rows = rows.filter((r) => norm(r.base) === mine);
     }
     return sendJson(res, 200, { ...full, rows, summary: directUncvSummary(rows, full.summary), scope: user.role });
+  }
+
+  // 直推转化明细：转介绍转化跟踪全量行（转化金额>0 即已转化），供「直推转化明细」页签展示
+  if (p === '/direct-detail' && method === 'GET') {
+    const norm = (s) => String(s || '').trim().replace(/基地$/, '');
+    let raw = db.rows.ds_direct || [];
+    if (user.role === 'base' && user.baseId) {
+      const b = db.bases.find((x) => x.id === user.baseId);
+      const mine = norm(b ? b.name : '');
+      if (mine) raw = raw.filter((r) => norm(r['基地']) === mine);
+    }
+    const rows = raw.map((r) => ({
+      introDate: String(r['转介绍日期'] || '').trim(),
+      base: String(r['基地'] || '').trim(),
+      gj: String(r['高经'] || '').trim(),
+      jl: String(r['经理'] || '').trim(),
+      zg: String(r['主管'] || '').trim(),
+      zz: String(r['组长'] || '').trim(),
+      empName: String(r['姓名'] || '').trim(),
+      empId: String(r['工号'] || '').trim(),
+      a: String(r['a'] || '').trim(),
+      b: String(r['b'] || '').trim(),
+      c: String(r['c'] || '').trim(),
+      activityId: String(r['活动ID'] || '').trim(),
+      grade: String(r['转化年级'] || '').trim(),
+      amount: engine.toNumber(r['转化金额'])
+    }))
+      .sort((x, y) => String(y.introDate || '').localeCompare(String(x.introDate || '')))
+      .map((r, i) => ({ seq: i + 1, ...r }));
+    return sendJson(res, 200, {
+      rows,
+      summary: { total: rows.length, converted: rows.filter((r) => r.amount > 0).length, amount: Math.round(rows.reduce((s, r) => s + (r.amount || 0), 0) * 100) / 100 },
+      scope: user.role
+    });
   }
 
   // 2.6 KOC 三类分层
