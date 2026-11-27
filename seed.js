@@ -164,28 +164,35 @@ const DATASET_DEFS = [
     ]
   },
   {
-    id: 'ds_high', key: 'high', name: '高潜老用户跟进表', category: '线索类',
+    id: 'ds_high', key: 'high', name: '高潜老用户跟进表', preset: 'koc', category: '线索类',
     desc: '存量高潜客户的跟进记录，关注跟进覆盖与二次转化。',
     icon: 'spark', tone: 'violet',
-    columns: ['跟进日期', '基地', '工号', '姓名', '客户姓名', '手机号', '跟进结果', '渠道', '备注'],
+    columns: ['老用户ID', '工号', '姓名', '基地', '高经', '经理', '主管', '组长', '累计新体验用户数量', '累计新正价用户数量', '累计金额', '26年新体验用户数量', '26年新正价用户数量'],
     standardFields: [
-      { key: 'date', label: '日期', type: 'date', required: true },
-      { key: 'base', label: '基地', type: 'text', required: true },
+      { key: 'oldUserId', label: '老用户ID', type: 'text', required: false },
       { key: 'empId', label: '工号', type: 'text', required: true },
-      { key: 'empName', label: '姓名', type: 'text', required: false },
-      { key: 'customer', label: '客户姓名', type: 'text', required: false },
-      { key: 'phone', label: '客户手机号', type: 'text', required: false },
-      { key: 'status', label: '跟进结果', type: 'enum', required: false },
-      { key: 'channel', label: '渠道', type: 'text', required: false },
-      { key: 'amount', label: '金额', type: 'number', required: false }
+      { key: 'empName', label: '姓名', type: 'text', required: true },
+      { key: 'base', label: '基地', type: 'text', required: true },
+      { key: 'managerName', label: '高经', type: 'text', required: false },
+      { key: 'manager2', label: '经理', type: 'text', required: false },
+      { key: 'manager3', label: '主管', type: 'text', required: false },
+      { key: 'manager4', label: '组长', type: 'text', required: false },
+      { key: 'cumExp', label: '累计新体验用户数量', type: 'number', required: false, segment: 'cum' },
+      { key: 'cumPay', label: '累计新正价用户数量', type: 'number', required: false, segment: 'cum' },
+      { key: 'amount', label: '累计金额', type: 'number', required: false, segment: 'cum' },
+      { key: 'y26Exp', label: '26年新体验用户数量', type: 'number', required: false, segment: 'y26' },
+      { key: 'y26Pay', label: '26年新正价用户数量', type: 'number', required: false, segment: 'y26' },
+      { key: 'y26Amount', label: '26年金额', type: 'number', required: false, segment: 'y26' },
+      { key: 'status', label: 'KOC层级', type: 'enum', required: false, computed: true },
+      { key: 'overlapNote', label: '重合备注', type: 'text', required: false, computed: true }
     ],
-    mapping: { date: '跟进日期', base: '基地', empId: '工号', empName: '姓名', customer: '客户姓名', phone: '手机号', status: '跟进结果', channel: '渠道' },
-    caliber: '跟进结果含「待跟进 / 跟进中 / 已转化 / 流失」；转化率 = 已转化 ÷ 跟进总量。',
+    mapping: { oldUserId: '老用户ID', empId: '工号', empName: '姓名', base: '基地', managerName: '高经', manager2: '经理', manager3: '主管', manager4: '组长', cumExp: '累计新体验用户数量', cumPay: '累计新正价用户数量', amount: '累计金额', y26Exp: '26年新体验用户数量', y26Pay: '26年新正价用户数量', y26Amount: '26年金额', status: 'KOC层级' },
+    caliber: '历史累计与26年转介绍两段上传，按工号合并为一人一行，自动分层并标记重合。',
     metrics: [
-      { key: 'list', name: '跟进量', type: 'count', field: '', filter: null, unit: '条', format: 'int', scope: 'base', desc: '底表总行数' },
-      { key: 'cust', name: '覆盖客户', type: 'distinct', field: 'phone', filter: null, unit: '人', format: 'int', scope: 'base', desc: '按手机号去重' },
-      { key: 'conv', name: '二次转化', type: 'count', field: '', filter: { field: 'status', op: 'eq', value: '已转化' }, unit: '人', format: 'int', scope: 'base', desc: '跟进结果=已转化' },
-      { key: 'rate', name: '转化率', type: 'ratio', formula: 'conv / list', unit: '%', format: 'pct', scope: 'global', desc: '二次转化 ÷ 跟进量' }
+      { key: 'list', name: '名单总人数', type: 'count', field: '', filter: null, unit: '人', format: 'int', scope: 'base', desc: '底表全部行数' },
+      { key: 'tierA', name: '历史累计≥6人', type: 'count', field: '', filter: { field: 'status', op: 'eq', value: '历史累计≥6' }, unit: '人', format: 'int', scope: 'base', desc: '累计新正价≥6 的用户数' },
+      { key: 'cumPay', name: '历史累计新正价', type: 'sum', field: 'cumPay', filter: null, unit: '人', format: 'int', scope: 'base', desc: '累计新正价用户数量求和' },
+      { key: 'y26Pay', name: '26年新正价', type: 'sum', field: 'y26Pay', filter: null, unit: '人', format: 'int', scope: 'base', desc: '26年新正价用户数量求和' }
     ]
   },
   {
@@ -332,16 +339,44 @@ function enrichDirectRows(rand, rows, employees) {
   return phoneMap;
 }
 
-function enrichHighRows(rand, rows) {
-  rows.forEach((r, i) => {
-    r['老用户ID'] = `urs-demo${5000 + i}@163.com`;
-    r['26年新体验用户数量'] = Math.floor(rand() * 3);
-    r['26年新正价用户数量'] = rand() < 0.35 ? Math.floor(rand() * 3) : 0;
-    r['累计新体验用户数量'] = Math.floor(rand() * 10);
-    const x = rand();
-    r['累计新正价用户数量'] = x < 0.08 ? 6 + Math.floor(rand() * 6) : x < 0.38 ? 3 + Math.floor(rand() * 3) : Math.floor(rand() * 3);
-    r['累计金额'] = r['累计新正价用户数量'] * 8000 + Math.floor(rand() * 5000);
+function buildHighRows(rand, employees, baseMap) {
+  const gjByBase = { wh: '沈国栋', cd: '唐启明', cs: '罗静怡', zz: '赵天宇', hf: '李杰', xa: '吴梦洁' };
+  const zgPool = ['钱进', '孙梅', '高峰', '胡伟', '林芳', '郑涛', '吴磊', '宋江'];
+  const zzPool = ['杨帆', '白雪', '吕明', '朱婷', '张强', '黄蓉'];
+  const rows = [];
+  let seq = 5000;
+  employees.forEach((e) => {
+    const n = 3 + Math.floor(rand() * 6); // 每名销售 3~8 个老用户
+    for (let k = 0; k < n; k += 1) {
+      const cumExp = Math.floor(rand() * 10);
+      const x = rand();
+      const cumPay = x < 0.08 ? 6 + Math.floor(rand() * 6) : x < 0.38 ? 3 + Math.floor(rand() * 3) : Math.floor(rand() * 3);
+      const y26Exp = Math.floor(rand() * 3);
+      const y26Pay = rand() < 0.35 ? Math.floor(rand() * 3) : 0;
+      const tier = cumPay >= 6 ? '历史累计≥6' : cumPay >= 3 ? '历史累计3-6' : (y26Pay > 0 ? '26年推荐成功' : '未入选');
+      const overlap = cumPay >= 3 && y26Pay > 0 ? '与26年推荐重合' : '';
+      rows.push({
+        _rowNo: rows.length + 1,
+        '老用户ID': `urs-demo${seq}@163.com`,
+        '工号': e.empId,
+        '姓名': e.name,
+        '基地': (baseMap[e.baseId] || {}).name || '',
+        '高经': gjByBase[e.baseId] || '',
+        '经理': e.managerName || '',
+        '主管': zgPool[Math.floor(rand() * zgPool.length)],
+        '组长': zzPool[Math.floor(rand() * zzPool.length)],
+        '累计新体验用户数量': cumExp,
+        '累计新正价用户数量': cumPay,
+        '累计金额': cumPay * 8000 + Math.floor(rand() * 5000),
+        '26年新体验用户数量': y26Exp,
+        '26年新正价用户数量': y26Pay,
+        'KOC层级': tier,
+        '重合备注': overlap
+      });
+      seq += 1;
+    }
   });
+  return rows;
 }
 
 function buildYoushuRows(rand, employees, baseMap, phoneMap) {
@@ -542,7 +577,7 @@ function buildSeed() {
     rows[ds.id] = buildDatasetRows(rand, ds.key, employees, baseMap);
   });
   const phoneMap = enrichDirectRows(rand, rows.ds_direct, employees);
-  enrichHighRows(rand, rows.ds_high);
+  rows.ds_high = buildHighRows(rand, employees, baseMap);
   rows.ds_youshu = buildYoushuRows(rand, employees, baseMap, phoneMap);
   rows.ds_diamond = buildDiamondRows(rand, phoneMap, rows.ds_direct);
   const segs = buildPerfTargetSegs(rand, employees);
