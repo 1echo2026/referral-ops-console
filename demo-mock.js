@@ -98,7 +98,7 @@
       return file('tables_' + (dsId(clean) || 'ds_deal') + '.json').then(function (d) { return d ? jres(d) : jres({ error: '演示快照缺失' }, 404); });
     }
     if (clean.indexOf('/api/records') === 0) return serveRecords(clean);
-    var specials = { 'koc-tier': 1, 'diamond-unused': 1, 'diamond-orders': 1, dragon: 1, 'direct-uncv': 1, 'abc-chain': 1, 'gj-team': 1 };
+    var specials = { 'koc-tier': 1, 'diamond-unused': 1, 'diamond-orders': 1, dragon: 1, 'direct-uncv': 1, 'abc-chain': 1, 'gj-team': 1, 'direct-detail': 1, 'uncv-reasons': 1 };
     var ep = clean.replace('/api/', '').split('?')[0];
     if (specials[ep]) return file(ep + '.json').then(function (d) { return d ? jres(d) : jres({ error: '演示快照缺失' }, 404); });
     return jres({ error: '演示环境未提供该接口' }, 404);

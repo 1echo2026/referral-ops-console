@@ -19,67 +19,40 @@ const BOARD_META = {
   emp: { title: '销售业绩榜', sub: '按工号数透累计转化金额 · 同分并列名次不跳号' }
 };
 
-async function rankingsBoot() {
-  let b;
-  try {
-    b = await api('/api/bootstrap');
-  } catch (err) {
-    location.href = 'login.html';
-    return;
-  }
-  Object.assign(Rank, { user: b.user, datasets: b.datasets, settings: b.settings });
-  const isBase = b.user.role === 'base';
-
-  const s = b.settings || {};
-  $('#brandName').textContent = s.title || '转介绍数据看板';
-  $('#brandSub').textContent = s.subtitle || '基地经营';
-  $('#viewerChip').textContent = `${b.user.name} · ${isBase ? (b.user.baseName || '基地查看') : '全部基地'}`;
-  $('#rankUpdated').textContent = `数据更新 ${(b.datasets[0] || {}).updatedAt || '—'}`;
-  if (!isBase) $('#adminLink').classList.remove('hidden');
-  if (b.user.role === 'admin') $('#editNote').classList.remove('hidden');
-  if (isBase) $('#pageSubtitle').textContent = '按取数逻辑实时计算的高经 / 团队 / 销售榜单 · 仅本基地';
+/* 嵌入明细数据页「业绩」页签：由 records.js 传入上下文后初始化（不再独立启动） */
+function initRankings(ctx) {
+  Object.assign(Rank, { user: ctx.user, datasets: ctx.datasets, settings: ctx.settings });
+  const isBase = Rank.user.role === 'base';
 
   const h = new URLSearchParams(location.search);
-  if (h.get('dataset') && Rank.datasets.some((d) => d.id === h.get('dataset'))) Rank.dataset = h.get('dataset');
-  else Rank.dataset = ((Rank.datasets.find((d) => d.preset === 'perf')) || Rank.datasets[0] || {}).id || '';
-  if (h.get('tab') && BOARD_META[h.get('tab')]) Rank.tab = h.get('tab');
+  if (h.get('rankTab') && BOARD_META[h.get('rankTab')]) Rank.tab = h.get('rankTab');
+  Rank.dataset = ((Rank.datasets.find((d) => d.preset === 'perf')) || Rank.datasets[0] || {}).id || '';
 
-  $('#logoutBtn').addEventListener('click', async () => {
-    await api('/api/logout', { method: 'POST' });
-    location.href = 'login.html';
-  });
+  if (Rank.user.role === 'admin') $('#editNote').classList.remove('hidden');
 
   $('#datasetFilter').innerHTML = Rank.datasets.map((d) => `<option value="${d.id}" ${d.id === Rank.dataset ? 'selected' : ''}>${esc(d.name)}</option>`).join('');
-  $('#datasetFilter').addEventListener('change', (e) => { Rank.dataset = e.target.value; load(); });
+  $('#datasetFilter').addEventListener('change', (e) => { Rank.dataset = e.target.value; loadRank(); });
   $('#rangeFilter').addEventListener('change', (e) => {
     Rank.range = e.target.value;
     Rank.from = ''; Rank.to = '';
     toggleCustom();
-    load();
+    loadRank();
   });
-  $('#fromFilter').addEventListener('change', (e) => { Rank.from = e.target.value; load(); });
-  $('#toFilter').addEventListener('change', (e) => { Rank.to = e.target.value; load(); });
+  $('#fromFilter').addEventListener('change', (e) => { Rank.from = e.target.value; loadRank(); });
+  $('#toFilter').addEventListener('change', (e) => { Rank.to = e.target.value; loadRank(); });
   $('#resetFilters').addEventListener('click', () => {
     Rank.range = 'all'; Rank.from = ''; Rank.to = '';
     $('#rangeFilter').value = 'all';
     toggleCustom();
-    load();
+    loadRank();
   });
-  $$('#rankTabs [data-key]').forEach((btn) => {
-    btn.addEventListener('click', () => {
-      Rank.tab = btn.dataset.key;
-      $$('#rankTabs [data-key]').forEach((x) => x.classList.toggle('active', x === btn));
-      renderBoard();
-    });
-  });
-  $$('#rankTabs [data-key]').forEach((x) => x.classList.toggle('active', x.dataset.key === Rank.tab));
 
   $('#copyRank').addEventListener('click', copyTable);
   $('#exportRank').addEventListener('click', exportCsv);
   $('#editNote').addEventListener('click', editNote);
 
   toggleCustom();
-  load();
+  loadRank();
 }
 
 /* 页签：只保留 高经榜 / 经理榜 / 销售榜；业绩底表附带月份选择 */
@@ -116,7 +89,7 @@ function toggleCustom() {
   $('#toFilter').value = Rank.to;
 }
 
-async function load() {
+async function loadRank() {
   const p = new URLSearchParams({ dataset: Rank.dataset, range: Rank.range });
   if (Rank.range === 'custom') { p.set('from', Rank.from); p.set('to', Rank.to); }
   try {
@@ -161,7 +134,8 @@ function renderSummary() {
       <div class="rank-stat-foot">${esc(c.foot)}</div>
     </div>`).join('');
   const srcNote = d.perf && d.perf.directSource ? ` · 直推数据源：${d.perf.directSource}` : '';
-  $('#rankUpdated').textContent = `${d.dataset.name} · 数据更新 ${new Date().toLocaleDateString('zh-CN')}${srcNote}`;
+  const ru = $('#rankUpdated');
+  if (ru) ru.textContent = `${d.dataset.name} · 数据更新 ${new Date().toLocaleDateString('zh-CN')}${srcNote}`;
 }
 
 /* ---------- 取数逻辑计算（2.1 / 2.2 / 2.4） ---------- */
@@ -188,24 +162,33 @@ function perfTargetOf(list, name, month) {
   return { target: group.reduce((s, t) => s + t.target, 0), month: latest.month, stale: true };
 }
 
-// 团队行（2.2）：当月直推业绩 / 目标 / 完成度；高经另带接例子业绩与总业绩（2.4）
+// 团队行（2.2）：当月直推业绩 / 目标 / 完成度；高经另带接leads业绩与总绩效（2.4）
 function perfTeamRows(p, level, month) {
   const amountOf = (r) => (month === '全部' ? (r.total || 0) : (r.byMonth[month] || 0));
   const rows = (p.direct[level] || []).map((r) => {
     const dAmt = amountOf(r);
     const t = perfTargetOf(p.targets.direct, r.name, month);
     let lAmt = 0;
+    let lT = null;
     if (level === 'gj') {
       const l = (p.leads.gj || []).find((x) => x.name === r.name);
       if (l) lAmt = amountOf(l);
+      lT = perfTargetOf(p.targets.leads || [], r.name, month);
     }
     return {
       name: r.name, base: r.base, dAmt, lAmt, totalAmt: dAmt + lAmt,
       target: t ? t.target : null, targetMonth: t ? t.month : '',
-      rate: t ? dAmt / t.target : null
+      rate: t ? dAmt / t.target : null,
+      lTarget: lT ? lT.target : null, lTargetMonth: lT ? lT.month : '',
+      lRate: lT ? lAmt / lT.target : null
     };
   });
   return rows.sort((a, b) => (b.rate ?? -1) - (a.rate ?? -1) || b.dAmt - a.dAmt);
+}
+
+/* 计算单元格：鼠标悬停显示公式，移出即隐藏（CSS :hover 实现） */
+function fTip(formula, inner) {
+  return `<span class="f-tip" data-f="${esc(formula)}">${inner}</span>`;
 }
 
 function renderNote() {
@@ -240,60 +223,78 @@ function renderBoard() {
   let rowHtml = (r) => '';
 
   if (p && Rank.tab === 'manager') {
-    // 2.2 + 2.4：高经直推完成度（降序，未设目标排后）+ 接例子综合
+    // 高经榜：排名/基地/高经/直推目标/直推业绩/直推完成度/接leads目标/接leads业绩/接leads完成度/总目标/总业绩/总目标完成度/总绩效
     const rows = perfTeamRows(p, 'gj', month);
     $('#rankTitle').textContent = `${meta.title} · ${month}`;
-    $('#rankSub').textContent = `${meta.sub} · 完成度 = 当月直推业绩 ÷ 直推目标${(rows.some((x) => x.targetMonth && x.targetMonth !== month && x.targetMonth !== '全部')) ? ' · 部分目标沿用已上传的最近月份口径' : ''}`;
-    head += '<th>高经</th><th>基地</th><th>直推业绩</th><th>直推目标</th><th>直推完成度</th><th>接例子业绩</th><th>总业绩</th><th>总目标</th><th>总完成度</th></tr>';
+    $('#rankSub').textContent = `按直推完成度降序 · 未设目标按业绩额排后 · 悬停数字可查看计算口径${(rows.some((x) => x.targetMonth && x.targetMonth !== month && x.targetMonth !== '全部')) ? ' · 部分目标沿用已上传的最近月份口径' : ''}`;
+    head += '<th>基地</th><th>高经</th><th>直推目标</th><th>直推业绩</th><th>直推完成度</th><th>接leads目标</th><th>接leads业绩</th><th>接leads完成度</th><th>总目标</th><th>总业绩</th><th>总目标完成度</th><th>总绩效</th></tr>';
     rowHtml = (r, i) => {
       const totalTarget = (r.target || 0);
       const overall = r.target ? r.totalAmt / totalTarget : null;
+      const perf = r.dAmt * 1.5 + r.lAmt;
+      const tgtHtml = r.target
+        ? fTip(`直推目标 = 月目标表${r.targetMonth === month || r.targetMonth === '全部' ? '当月' : `最近月份(${r.targetMonth})`}上传的高经团队目标`, `${fmtCompact(r.target, 'money')}${r.targetMonth !== month && r.targetMonth !== '全部' ? `<div class="text-xs muted">(${esc(r.targetMonth)})</div>` : ''}`)
+        : '<span class="empty-cell">未设目标</span>';
+      const dAmtHtml = fTip(`直推业绩 = 有数业绩完成度按工号数透${month}销售直推业绩`, `<b>${fmtCompact(r.dAmt, 'money')}</b>`);
+      const rateHtml = r.rate === null ? '<span class="empty-cell">—</span>' : fTip(`直推完成度 = 直推业绩 ÷ 直推目标 = ${fmtCompact(r.dAmt, 'money')} ÷ ${fmtCompact(r.target, 'money')}`, `<b style="color:${rateColor(r.rate)}">${(r.rate * 100).toFixed(0)}%</b>`);
+      const lTgtHtml = r.lTarget
+        ? fTip(`接leads目标 = 月目标表${r.lTargetMonth === month || r.lTargetMonth === '全部' ? '当月' : `最近月份(${r.lTargetMonth})`}上传的接leads目标`, fmtCompact(r.lTarget, 'money'))
+        : '<span class="empty-cell">—</span>';
+      const lAmtHtml = fTip(`接leads业绩 = leads分配表 × 订单池按用户ID数透${month}已转化金额`, fmtCompact(r.lAmt, 'money'));
+      const lRateHtml = r.lTarget === null ? '<span class="empty-cell">—</span>' : fTip(`接leads完成度 = 接leads业绩 ÷ 接leads目标 = ${fmtCompact(r.lAmt, 'money')} ÷ ${fmtCompact(r.lTarget, 'money')}`, `<span style="color:${rateColor(r.lRate)}">${(r.lRate * 100).toFixed(0)}%</span>`);
+      const totalTgtHtml = r.target ? fTip('总目标 = 直推目标（接leads目标暂未单独设置）', fmtCompact(totalTarget, 'money')) : '<span class="empty-cell">—</span>';
+      const totalAmtHtml = fTip(`总业绩 = 直推业绩 + 接leads业绩 = ${fmtCompact(r.dAmt, 'money')} + ${fmtCompact(r.lAmt, 'money')}`, `<b>${fmtCompact(r.totalAmt, 'money')}</b>`);
+      const overallHtml = overall === null ? '<span class="empty-cell">—</span>' : fTip(`总目标完成度 = 总业绩 ÷ 总目标 = ${fmtCompact(r.totalAmt, 'money')} ÷ ${fmtCompact(totalTarget, 'money')}`, `<span style="color:${rateColor(overall)}">${(overall * 100).toFixed(0)}%</span>`);
+      const perfHtml = fTip(`总绩效 = 高经直推业绩 × 1.5 + 高经接leads业绩 = ${fmtCompact(r.dAmt, 'money')} × 1.5 + ${fmtCompact(r.lAmt, 'money')}`, `<b>${fmtCompact(perf, 'money')}</b>`);
       return `<tr class="${i < 3 ? `top-${i + 1}` : ''}">
         <td class="num">${i < 3 ? `<span class="rank-label">No.${i + 1}</span>` : i + 1}</td>
-        <td class="cell-left"><span class="rank-name">${esc(r.name)}</span></td>
         <td>${esc(r.base || '未匹配')}</td>
-        <td class="num"><b>${fmtCompact(r.dAmt, 'money')}</b></td>
-        <td class="num">${r.target ? `${fmtCompact(r.target, 'money')}${r.targetMonth !== month && r.targetMonth !== '全部' ? `<div class="text-xs muted">(${esc(r.targetMonth)})</div>` : ''}` : '<span class="empty-cell">未设目标</span>'}</td>
-        <td class="num">${r.rate === null ? '<span class="empty-cell">—</span>' : `<b style="color:${rateColor(r.rate)}">${(r.rate * 100).toFixed(0)}%</b>`}</td>
-        <td class="num">${fmtCompact(r.lAmt, 'money')}</td>
-        <td class="num"><b>${fmtCompact(r.totalAmt, 'money')}</b></td>
-        <td class="num">${r.target ? fmtCompact(totalTarget, 'money') : '<span class="empty-cell">—</span>'}</td>
-        <td class="num">${overall === null ? '<span class="empty-cell">—</span>' : `<span style="color:${rateColor(overall)}">${(overall * 100).toFixed(0)}%</span>`}</td>
+        <td class="cell-left"><span class="rank-name">${esc(r.name)}</span></td>
+        <td class="num">${tgtHtml}</td>
+        <td class="num">${dAmtHtml}</td>
+        <td class="num">${rateHtml}</td>
+        <td class="num">${lTgtHtml}</td>
+        <td class="num">${lAmtHtml}</td>
+        <td class="num">${lRateHtml}</td>
+        <td class="num">${totalTgtHtml}</td>
+        <td class="num">${totalAmtHtml}</td>
+        <td class="num">${overallHtml}</td>
+        <td class="num">${perfHtml}</td>
       </tr>`;
     };
-    Rank.matrix = { headers: ['排名', '高经', '基地', `直推业绩(${month})`, '直推目标', '直推完成度', '接例子业绩', '总业绩', '总目标', '总完成度'], rows: rows.map((r, i) => [i + 1, r.name, r.base || '未匹配', r.dAmt, r.target || '未设目标', r.rate === null ? '' : `${(r.rate * 100).toFixed(0)}%`, r.lAmt, r.totalAmt, r.target || '', r.target ? `${(r.totalAmt / r.target * 100).toFixed(0)}%` : '']) };
+    Rank.matrix = { headers: ['排名', '基地', '高经', '直推目标', '直推业绩', '直推完成度', '接leads目标', '接leads业绩', '接leads完成度', '总目标', '总业绩', '总目标完成度', '总绩效'], rows: rows.map((r, i) => [i + 1, r.base || '未匹配', r.name, r.target || '', r.dAmt, r.rate === null ? '' : `${(r.rate * 100).toFixed(0)}%`, r.lTarget || '', r.lAmt, r.lTarget ? `${(r.lRate * 100).toFixed(0)}%` : '', r.target || '', r.totalAmt, r.target ? `${(r.totalAmt / r.target * 100).toFixed(0)}%` : '', (r.dAmt * 1.5 + r.lAmt)]) };
     board = rows;
   } else if (p && Rank.tab === 'team') {
-    // 2.2：经理团队直推完成度
+    // 经理榜：排名/基地/经理/直推目标/直推业绩/直推完成度
     const rows = perfTeamRows(p, 'jl', month);
     $('#rankTitle').textContent = `${meta.title} · ${month}`;
-    $('#rankSub').textContent = `${meta.sub}${(rows.some((x) => x.targetMonth && x.targetMonth !== month && x.targetMonth !== '全部')) ? ' · 部分目标沿用已上传的最近月份口径' : ''}`;
-    head += '<th>经理</th><th>基地</th><th>直推业绩</th><th>直推目标</th><th>完成度</th></tr>';
+    $('#rankSub').textContent = `经理团队直推业绩 ÷ 直推目标 · 按完成度降序 · 悬停数字可查看计算口径${(rows.some((x) => x.targetMonth && x.targetMonth !== month && x.targetMonth !== '全部')) ? ' · 部分目标沿用已上传的最近月份口径' : ''}`;
+    head += '<th>基地</th><th>经理</th><th>直推目标</th><th>直推业绩</th><th>直推完成度</th></tr>';
     rowHtml = (r, i) => `<tr class="${i < 3 ? `top-${i + 1}` : ''}">
         <td class="num">${i < 3 ? `<span class="rank-label">No.${i + 1}</span>` : i + 1}</td>
-        <td class="cell-left"><span class="rank-name">${esc(r.name)}</span></td>
         <td>${esc(r.base || '未匹配')}</td>
-        <td class="num"><b>${fmtCompact(r.dAmt, 'money')}</b></td>
-        <td class="num">${r.target ? `${fmtCompact(r.target, 'money')}${r.targetMonth !== month && r.targetMonth !== '全部' ? `<div class="text-xs muted">(${esc(r.targetMonth)})</div>` : ''}` : '<span class="empty-cell">未设目标</span>'}</td>
-        <td class="num">${r.rate === null ? '<span class="empty-cell">—</span>' : `<span class="rank-bar"><span class="rank-bar-track"><span class="rank-bar-fill" style="width:${Math.min(100, r.rate * 100)}%;background:${r.rate >= 1 ? '#10b981' : r.rate >= 0.85 ? '#f59e0b' : '#60a5fa'}"></span></span><span class="rank-bar-val" style="color:${rateColor(r.rate)}">${(r.rate * 100).toFixed(0)}%</span></span>`}</td>
+        <td class="cell-left"><span class="rank-name">${esc(r.name)}</span></td>
+        <td class="num">${r.target ? fTip(`直推目标 = 月目标表${r.targetMonth === month || r.targetMonth === '全部' ? '当月' : `最近月份(${r.targetMonth})`}上传的经理团队目标`, `${fmtCompact(r.target, 'money')}${r.targetMonth !== month && r.targetMonth !== '全部' ? `<div class="text-xs muted">(${esc(r.targetMonth)})</div>` : ''}`) : '<span class="empty-cell">未设目标</span>'}</td>
+        <td class="num">${fTip(`直推业绩 = 有数业绩完成度按工号数透${month}销售直推业绩（经理团队=Σ团队成员直推业绩）`, `<b>${fmtCompact(r.dAmt, 'money')}</b>`)}</td>
+        <td class="num">${r.rate === null ? '<span class="empty-cell">—</span>' : fTip(`直推完成度 = 直推业绩 ÷ 直推目标 = ${fmtCompact(r.dAmt, 'money')} ÷ ${fmtCompact(r.target, 'money')}`, `<span class="rank-bar"><span class="rank-bar-track"><span class="rank-bar-fill" style="width:${Math.min(100, r.rate * 100)}%;background:${r.rate >= 1 ? '#10b981' : r.rate >= 0.85 ? '#f59e0b' : '#60a5fa'}"></span></span><span class="rank-bar-val" style="color:${rateColor(r.rate)}">${(r.rate * 100).toFixed(0)}%</span></span>`)}</td>
       </tr>`;
-    Rank.matrix = { headers: ['排名', '经理', '基地', `直推业绩(${month})`, '直推目标', '完成度'], rows: rows.map((r, i) => [i + 1, r.name, r.base || '未匹配', r.dAmt, r.target || '未设目标', r.rate === null ? '' : `${(r.rate * 100).toFixed(0)}%`]) };
+    Rank.matrix = { headers: ['排名', '基地', '经理', '直推目标', '直推业绩', '直推完成度'], rows: rows.map((r, i) => [i + 1, r.base || '未匹配', r.name, r.target || '未设目标', r.dAmt, r.rate === null ? '' : `${(r.rate * 100).toFixed(0)}%`]) };
     board = rows;
   } else if (p && Rank.tab === 'emp') {
-    // 2.1：一线直推业绩（同分并列名次、不跳号）
+    // 销售榜：排名/基地/所属高经团队/直推目标/直推业绩/直推完成度
     const rows = p.frontline || [];
     $('#rankTitle').textContent = `${meta.title} · ${month}`;
-    $('#rankSub').textContent = `${meta.sub} · 名次按转化金额降序，同分并列`;
-    head += '<th>销售</th><th>销售工号</th><th>团队</th><th>基地</th><th>直推业绩</th></tr>';
+    $('#rankSub').textContent = `按工号数透当月销售直推业绩 · 同分并列名次不跳号 · 悬停数字可查看计算口径`;
+    head += '<th>基地</th><th>所属高经团队</th><th>直推目标</th><th>直推业绩</th><th>直推完成度</th></tr>';
     rowHtml = (r, i) => `<tr class="${r.rank <= 3 ? `top-${r.rank}` : ''}">
         <td class="num">${r.rank <= 3 ? `<span class="rank-label">No.${r.rank}</span>` : r.rank}</td>
-        <td class="cell-left"><span class="rank-name">${esc(r.name || '—')}</span></td>
-        <td class="mono text-sm">${esc(r.empId || '—')}</td>
-        <td>${esc(r.teamName || '—')}</td>
         <td>${esc(r.base || '未匹配')}</td>
-        <td class="num"><b>${fmtCompact(month === '全部' ? r.total : (r.byMonth[month] || 0), 'money')}</b></td>
+        <td class="cell-left">${esc(r.gjName || '未匹配')}</td>
+        <td class="num"><span class="empty-cell">—</span></td>
+        <td class="num">${fTip(`直推业绩 = 有数业绩完成度按工号数透${month}销售直推业绩`, `<b>${fmtCompact(month === '全部' ? r.total : (r.byMonth[month] || 0), 'money')}</b>`)}</td>
+        <td class="num"><span class="empty-cell">—</span></td>
       </tr>`;
-    Rank.matrix = { headers: ['名次', '销售', '销售工号', '团队', '基地', `直推业绩(${month})`], rows: rows.map((r) => [r.rank, r.name || '', r.empId || '', r.teamName || '', r.base || '未匹配', month === '全部' ? r.total : (r.byMonth[month] || 0)]) };
+    Rank.matrix = { headers: ['排名', '基地', '所属高经团队', '直推目标', '直推业绩', '直推完成度'], rows: rows.map((r) => [r.rank, r.base || '未匹配', r.gjName || '未匹配', '', month === '全部' ? r.total : (r.byMonth[month] || 0), '']) };
     board = rows;
   } else if (Rank.tab === 'manager') {
     $('#rankTitle').textContent = `${meta.title} · ${d.dataset.name}`;
@@ -444,4 +445,4 @@ function editNote() {
   });
 }
 
-rankingsBoot();
+/* 由 records.js 在切入「业绩」页签时调用 initRankings()，本文件不再自动启动 */

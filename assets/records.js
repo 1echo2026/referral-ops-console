@@ -45,11 +45,17 @@ const Rec = {
   dragon: { board: 'A', period: '', me: '' },
   dragonData: null, dragonCount: '',
   gjteam: { base: '', gj: '', panelOpen: false, picked: [], includeSelf: false },
-  gjteamData: null
+  gjteamData: null,
+  dmd2: { mode: 'orders' },
+  ddetail: { from: '', to: '', base: 'all', q: '', limit: 300 },
+  ddetailData: null, ddetailCount: '',
+  lconv: { from: '', to: '', base: 'all', q: '', limit: 200 },
+  lconvData: null, lconvCount: '',
+  uncvReasons: {}
 };
 
-// 明细名单页隐藏的底表页签（业绩相关 + 已被专项视图替代的钻石底表）
-const HIDDEN_TAB_DATASETS = ['ds_deal', 'ds_youshu', 'ds_diamond'];
+// 明细数据页隐藏的底表页签（业绩相关 + 质检台账/转介绍转化跟踪已下线展示）
+const HIDDEN_TAB_DATASETS = ['ds_deal', 'ds_youshu', 'ds_diamond', 'ds_qc', 'ds_direct'];
 
 // 业绩底表 id（接例子未转化数据来源）
 function perfDataset() {
@@ -69,6 +75,10 @@ function isDiamond() { return Rec.dataset === '__diamond'; }
 function isDiamondOrders() { return Rec.dataset === '__dmd'; }
 function isDragon() { return Rec.dataset === '__dragon'; }
 function isGjteam() { return Rec.dataset === '__gjteam'; }
+function isRank() { return Rec.dataset === '__rank'; }
+function isDmd2() { return Rec.dataset === '__dmd2'; }
+function isDdetail() { return Rec.dataset === '__ddetail'; }
+function isLconv() { return Rec.dataset === '__lconv'; }
 
 function highDataset() { return Rec.datasets.find((d) => d.id === 'ds_high') || null; }
 function diamondDataset() { return Rec.datasets.find((d) => d.id === 'ds_diamond') || null; }
@@ -92,17 +102,22 @@ async function recordsBoot() {
   if (!isBase) $('#adminLink').classList.remove('hidden');
   if (isBase) $('#baseField').classList.add('hidden');
 
-  // URL 参数：dataset / base / status / q / from / to
+  // URL 参数：dataset / base / status / q / from / to（旧页签键重定向到新页签）
   const h = new URLSearchParams(location.search);
   if (h.get('dataset') === '__uncv' && perfDataset()) Rec.dataset = '__uncv';
-  else if (h.get('dataset') === '__duncv' && directUncvDataset()) Rec.dataset = '__duncv';
-  else if (h.get('dataset') === '__chain' && directUncvDataset()) Rec.dataset = '__chain';
-  else if (h.get('dataset') === '__ktier' && highDataset()) Rec.dataset = '__ktier';
-  else if (h.get('dataset') === '__diamond' && diamondDataset()) Rec.dataset = '__diamond';
-  else if (h.get('dataset') === '__dmd' && diamondDataset()) Rec.dataset = '__dmd';
+  else if (h.get('dataset') === '__duncv' && directUncvDataset()) Rec.dataset = '__ddetail';
+  else if (h.get('dataset') === '__ddetail' && directUncvDataset()) Rec.dataset = '__ddetail';
+  else if (h.get('dataset') === '__chain' && directUncvDataset()) Rec.dataset = '__ddetail';
+  else if (h.get('dataset') === '__ktier' && highDataset()) Rec.dataset = '__rank';
+  else if (h.get('dataset') === '__diamond' && diamondDataset()) Rec.dataset = '__dmd2';
+  else if (h.get('dataset') === '__dmd' && diamondDataset()) Rec.dataset = '__dmd2';
+  else if (h.get('dataset') === '__dmd2' && diamondDataset()) Rec.dataset = '__dmd2';
   else if (h.get('dataset') === '__dragon' && perfDataset()) Rec.dataset = '__dragon';
-  else if (h.get('dataset') === '__gjteam' && perfDataset()) Rec.dataset = '__gjteam';
+  else if (h.get('dataset') === '__gjteam' && perfDataset()) Rec.dataset = '__rank';
+  else if (h.get('dataset') === '__rank' && perfDataset()) Rec.dataset = '__rank';
+  else if (h.get('dataset') === '__lconv' && perfDataset() && Rec.user.role === 'admin') Rec.dataset = '__lconv';
   else if (h.get('dataset') && Rec.datasets.some((d) => d.id === h.get('dataset') && !HIDDEN_TAB_DATASETS.includes(d.id))) Rec.dataset = h.get('dataset');
+  else if (perfDataset() && !h.get('base') && !h.get('status') && !h.get('q') && !h.get('from') && !h.get('to')) Rec.dataset = '__rank';
   else Rec.dataset = ((Rec.datasets.find((d) => !HIDDEN_TAB_DATASETS.includes(d.id))) || Rec.datasets[0] || {}).id || '';
   if (!isBase && h.get('base')) Rec.base = h.get('base');
   if (h.get('status')) Rec.status = h.get('status');
@@ -122,6 +137,25 @@ async function recordsBoot() {
   $('#statusFilter').addEventListener('change', (e) => { Rec.status = e.target.value; Rec.page = 1; load(); writeUrl(); });
   $('#searchInput').addEventListener('input', debounce(() => { Rec.q = $('#searchInput').value.trim(); Rec.page = 1; load(); }, 300));
   $('#resetBtn').addEventListener('click', () => {
+    if (isRank()) {
+      $('#resetFilters').click();
+      return;
+    }
+    if (isDdetail()) {
+      Rec.ddetail = { from: '', to: '', base: 'all', q: '', limit: 300 };
+      renderDdetail();
+      return;
+    }
+    if (isLconv()) {
+      Rec.lconv = { from: '', to: '', base: 'all', q: '', limit: 200 };
+      renderLconv();
+      return;
+    }
+    if (isDmd2()) {
+      if (Rec.dmd2.mode === 'orders') { Rec.dmd = { from: '', to: '', base: 'all', q: '', limit: 200 }; renderDiamondOrders(); }
+      else { Rec.diamond = { state: 'all', base: 'all', q: '', limit: 200, sort: 'grant' }; renderDiamond(); }
+      return;
+    }
     if (isUncv()) {
       Rec.uncv = { from: '', to: '', base: 'all', refund: 'all', q: '', limit: 200, loaded: Rec.uncv.loaded };
       loadUncv();
@@ -169,6 +203,10 @@ async function recordsBoot() {
     load();
   });
   $('#exportBtn').addEventListener('click', () => {
+    if (isRank()) { exportRank(); return; }
+    if (isDdetail()) { exportDdetail(); return; }
+    if (isLconv()) { exportLconv(); return; }
+    if (isDmd2()) { if (Rec.dmd2.mode === 'orders') exportDiamondOrders(); else exportDiamond(); return; }
     if (isUncv()) { exportUncv(); return; }
     if (isDirectUncv()) { exportDirectUncv(); return; }
     if (isChain()) { exportChain(); return; }
@@ -187,25 +225,14 @@ async function recordsBoot() {
   $('#drawerBackdrop').addEventListener('click', (e) => { if (e.target === e.currentTarget) closeDrawer(); });
   document.addEventListener('keydown', (e) => { if (e.key === 'Escape') closeDrawer(); });
 
-  // KOC 分层设置按钮（仅管理员 + KOC 底表时显示）
-  if (Rec.user.role === 'admin') {
-    const toolbar = document.querySelector('.records-toolbar');
-    const reset = $('#resetBtn');
-    if (toolbar && reset) {
-      const wrap = document.createElement('span');
-      wrap.id = 'kocCfgBtns';
-      wrap.style.display = 'none';
-      wrap.innerHTML = `
-        <button class="btn btn-sm" id="kocTierBtn" type="button">${icon('layers', 13)}划分层级</button>
-        <button class="btn btn-sm" id="kocColorBtn" type="button">${icon('spark', 13)}层级颜色</button>`;
-      toolbar.insertBefore(wrap, reset);
-      $('#kocTierBtn').addEventListener('click', openKocTierModal);
-      $('#kocColorBtn').addEventListener('click', openKocColorModal);
-    }
-  }
+  // 钻石兑换与使用明细：两个模式按钮
+  const bO = $('#dmd2BtnOrders');
+  const bU = $('#dmd2BtnUsage');
+  if (bO) bO.addEventListener('click', () => { Rec.dmd2.mode = 'orders'; renderDmd2(); loadDiamondOrders(); });
+  if (bU) bU.addEventListener('click', () => { Rec.dmd2.mode = 'usage'; renderDmd2(); loadDiamond(); });
 
-  if (directUncvDataset()) { prefetchDuncv(); prefetchChain(); }
-  if (highDataset()) prefetchKtier();
+  // KOC 三类分层页签已下线，分层配置按钮一并移除
+
   if (diamondDataset()) { prefetchDiamond(); prefetchDiamondOrders(); }
   if (perfDataset()) prefetchDragon();
   load();
@@ -277,31 +304,23 @@ function renderDatasetTabs() {
     <button class="table-tab ${isUncv() ? 'active' : ''}" data-ds="__uncv" type="button">
       接例子未转化 ${Rec.uncvCount !== '' ? `<span class="tab-count">${fmtInt(Rec.uncvCount)}</span>` : ''}
     </button>` : '';
-  const duncvTab = duncvDs ? `
-    <button class="table-tab ${isDirectUncv() ? 'active' : ''}" data-ds="__duncv" type="button">
-      直推未转化 ${Rec.duncvCount !== '' ? `<span class="tab-count">${fmtInt(Rec.duncvCount)}</span>` : ''}
+  const lconvTab = perfDs && Rec.user.role === 'admin' ? `
+    <button class="table-tab ${isLconv() ? 'active' : ''}" data-ds="__lconv" type="button">
+      接leads已转化明细 ${Rec.lconvCount !== '' ? `<span class="tab-count">${fmtInt(Rec.lconvCount)}</span>` : ''}
     </button>` : '';
-  const chainTab = duncvDs ? `
-    <button class="table-tab ${isChain() ? 'active' : ''}" data-ds="__chain" type="button">
-      ABC 链路分析 ${Rec.chainCount !== '' ? `<span class="tab-count">${fmtInt(Rec.chainCount)}</span>` : ''}
+  const ddetailTab = duncvDs ? `
+    <button class="table-tab ${isDdetail() ? 'active' : ''}" data-ds="__ddetail" type="button">
+      直推转化明细 ${Rec.ddetailCount !== '' ? `<span class="tab-count">${fmtInt(Rec.ddetailCount)}</span>` : ''}
     </button>` : '';
-  const ktierTab = highDataset() ? `
-    <button class="table-tab ${isKtier() ? 'active' : ''}" data-ds="__ktier" type="button">
-      KOC 三类分层 ${Rec.ktierCount !== '' ? `<span class="tab-count">${fmtInt(Rec.ktierCount)}</span>` : ''}
+  const dmd2Tab = diamondDataset() ? `
+    <button class="table-tab ${isDmd2() ? 'active' : ''}" data-ds="__dmd2" type="button">
+      钻石兑换与使用明细 ${Rec.dmdCount !== '' ? `<span class="tab-count">${fmtInt(Rec.dmdCount)}</span>` : ''}
     </button>` : '';
-  const diamondTab = diamondDataset() ? `
-    <button class="table-tab ${isDiamond() ? 'active' : ''}" data-ds="__diamond" type="button">
-      钻石未使用 ${Rec.diamondCount !== '' ? `<span class="tab-count">${fmtInt(Rec.diamondCount)}</span>` : ''}
-    </button>` : '';
-  const dmdTab = diamondDataset() ? `
-    <button class="table-tab ${isDiamondOrders() ? 'active' : ''}" data-ds="__dmd" type="button">
-      钻石兑换明细 ${Rec.dmdCount !== '' ? `<span class="tab-count">${fmtInt(Rec.dmdCount)}</span>` : ''}
-    </button>` : '';
-  const dragonTab = perfDataset() ? `
+  const dragonTab = perfDs ? `
     <button class="table-tab ${isDragon() ? 'active' : ''}" data-ds="__dragon" type="button">龙珠奖</button>` : '';
-  const gjteamTab = perfDataset() ? `
-    <button class="table-tab ${isGjteam() ? 'active' : ''}" data-ds="__gjteam" type="button">高经团队</button>` : '';
-  $('#datasetTabs').innerHTML = tabs + uncvTab + duncvTab + chainTab + ktierTab + diamondTab + dmdTab + dragonTab + gjteamTab;
+  const rankTab = perfDs ? `
+    <button class="table-tab ${isRank() ? 'active' : ''}" data-ds="__rank" type="button">业绩</button>` : '';
+  $('#datasetTabs').innerHTML = rankTab + tabs + uncvTab + lconvTab + ddetailTab + dmd2Tab + dragonTab;
   $$('#datasetTabs [data-ds]').forEach((btn) => {
     btn.addEventListener('click', () => {
       Rec.dataset = btn.dataset.ds;
@@ -331,7 +350,11 @@ function writeUrl() {
 
 async function load() {
   writeUrl();
+  if (isRank()) { toggleView('rank'); loadRankView(); return; }
   if (isUncv()) { toggleView('uncv'); await loadUncv(); return; }
+  if (isLconv()) { toggleView('lconv'); await loadLconv(); return; }
+  if (isDdetail()) { toggleView('ddetail'); loadDdetail(); return; }
+  if (isDmd2()) { toggleView('dmd2'); loadDmd2(); return; }
   if (isDirectUncv()) { toggleView('duncv'); await loadDirectUncv(); return; }
   if (isChain()) { toggleView('chain'); await loadChain(); return; }
   if (isKtier()) { toggleView('ktier'); loadKtier(); return; }
@@ -366,16 +389,20 @@ async function load() {
 function toggleView(mode) {
   $('#listCard').classList.toggle('hidden', mode !== 'list');
   $('#uncvCard').classList.toggle('hidden', mode !== 'uncv');
+  const lc = $('#lconvCard');
+  if (lc) lc.classList.toggle('hidden', mode !== 'lconv');
+  const rk = $('#rankCard');
+  if (rk) rk.classList.toggle('hidden', mode !== 'rank');
+  const dd = $('#ddetailCard');
+  if (dd) dd.classList.toggle('hidden', mode !== 'ddetail');
+  const d2 = $('#dmd2Card');
+  if (d2) d2.classList.toggle('hidden', mode !== 'dmd2');
   const d = $('#duncvCard');
   if (d) d.classList.toggle('hidden', mode !== 'duncv');
   const cc = $('#chainCard');
   if (cc) cc.classList.toggle('hidden', mode !== 'chain');
   const kt = $('#ktierCard');
   if (kt) kt.classList.toggle('hidden', mode !== 'ktier');
-  const dm = $('#diamondCard');
-  if (dm) dm.classList.toggle('hidden', mode !== 'diamond');
-  const dmd = $('#dmdCard');
-  if (dmd) dmd.classList.toggle('hidden', mode !== 'dmd');
   const dg = $('#dragonCard');
   if (dg) dg.classList.toggle('hidden', mode !== 'dragon');
   const gjt = $('#gjteamCard');
@@ -431,6 +458,7 @@ async function loadUncv() {
       Rec.uncvPerf = (await api(`/api/rankings?dataset=${perfDs.id}&range=all`)).perf;
       Rec.uncv.loaded = true;
       Rec.uncvCount = (Rec.uncvPerf.stats || {}).unconvertedCount || 0;
+      try { Rec.uncvReasons = ((await api('/api/uncv-reasons')) || {}).reasons || {}; } catch (e) { /* 原因加载失败不影响主表 */ }
       renderDatasetTabs();
     } catch (err) {
       card.innerHTML = `<div class="card-body"><div class="empty"><h3>加载失败</h3><p>${esc(err.message)}</p></div></div>`;
@@ -438,6 +466,33 @@ async function loadUncv() {
     }
   }
   renderUncv();
+}
+
+/** 填写未转化原因弹窗（按用户ID 持久化） */
+function openUncvReasonModal(userId) {
+  const cur = (Rec.uncvReasons || {})[userId] || null;
+  openModal({
+    title: '填写未转化原因',
+    subtitle: `用户ID：${userId}${cur ? ` · 最近填写：${cur.by} · ${cur.at}` : ''}`,
+    body: `
+      <div class="form-field"><label>未转化原因（留空保存即清除）</label>
+        <textarea class="control" id="uncvReasonText" rows="3" placeholder="例如：客户暂无预算 / 联系不上 / 已报竞品...">${esc(cur ? cur.text : '')}</textarea></div>`,
+    footer: `
+      <button class="btn" id="uncvReasonCancel" type="button">取消</button>
+      <button class="btn btn-primary" id="uncvReasonSave" type="button">保存</button>`,
+    onMount: (box) => {
+      box.querySelector('#uncvReasonCancel').addEventListener('click', closeModal);
+      box.querySelector('#uncvReasonSave').addEventListener('click', async () => {
+        try {
+          const r = await api('/api/uncv-reason', { method: 'POST', body: { userId, text: box.querySelector('#uncvReasonText').value } });
+          Rec.uncvReasons = r.reasons || {};
+          closeModal();
+          toast('未转化原因已保存', 'ok');
+          renderUncv();
+        } catch (err) { toast(err.message, 'err'); }
+      });
+    }
+  });
 }
 
 function renderUncv() {
@@ -450,7 +505,9 @@ function renderUncv() {
   const bases = [...new Set(all.map((r) => r.base || '').filter(Boolean))].sort();
   const baseOpts = '<option value="all">全部基地</option>' + bases.map((b) => `<option value="${esc(b)}" ${v.base === b ? 'selected' : ''}>${esc(b)}</option>`).join('');
 
-  const rowsHtml = shown.map((r) => `
+  const rowsHtml = shown.map((r) => {
+    const reason = (Rec.uncvReasons || {})[String(r.userId || '').trim()] || null;
+    return `
     <tr>
       <td class="num">${esc(r.time || r.month || '—')}</td>
       <td class="num">${esc(r.userId || '—')}</td>
@@ -459,7 +516,10 @@ function renderUncv() {
       <td class="num">${esc(r.empId || '—')}</td>
       <td class="num">${fmtCompact(r.amount || 0, 'money')}</td>
       <td>${r.refund ? '<span class="tag-refund">完全退款</span>' : '<span class="tag-sim">未转化</span>'}</td>
-    </tr>`).join('');
+      <td>${reason ? `<span class="text-sm">${esc(reason.text)}</span><div class="text-xs muted">${esc(reason.by)} · ${esc(reason.at)}</div>` : '<span class="muted">—</span>'}</td>
+      <td><button class="btn btn-sm" type="button" data-uncv-reason="${esc(r.userId || '')}">${reason ? '修改' : '填写'}</button></td>
+    </tr>`;
+  }).join('');
 
   $('#pageSubtitle').textContent = '接例子未转化 · leads 分配表为底表，用户ID 匹配订单池累计转化金额为 0 即未转化；完全退款单独标记';
   $('#uncvCard').innerHTML = `
@@ -492,8 +552,8 @@ function renderUncv() {
     </div>
     <div class="table-wrap" style="max-height:62vh">
       <table class="table">
-        <thead><tr><th>分配时间</th><th>用户ID</th><th>基地</th><th>CCid</th><th>绑定工号</th><th>累计转化金额</th><th>状态</th></tr></thead>
-        <tbody>${rowsHtml || `<tr><td colspan="7"><div class="empty"><h3>当前筛选条件下暂无未转化数据</h3><p>调整筛选条件后重试</p></div></td></tr>`}</tbody>
+        <thead><tr><th>分配时间</th><th>用户ID</th><th>基地</th><th>CCid</th><th>绑定工号</th><th>累计转化金额</th><th>状态</th><th>未转化原因</th><th></th></tr></thead>
+        <tbody>${rowsHtml || `<tr><td colspan="9"><div class="empty"><h3>当前筛选条件下暂无未转化数据</h3><p>调整筛选条件后重试</p></div></td></tr>`}</tbody>
       </table>
     </div>
     <div class="table-footer">
@@ -512,6 +572,9 @@ function renderUncv() {
   });
   const more = $('#uncvMore');
   if (more) more.addEventListener('click', () => { v.limit += 500; renderUncv(); });
+  $$('#uncvCard [data-uncv-reason]').forEach((btn) => {
+    btn.addEventListener('click', () => openUncvReasonModal(btn.dataset.uncvReason));
+  });
 }
 
 function exportUncv() {
@@ -523,9 +586,137 @@ function exportUncv() {
     { label: 'CCid', value: (r) => r.ccId || '' },
     { label: '绑定工号', value: (r) => r.empId || '' },
     { label: '累计转化金额', value: (r) => r.amount || 0 },
-    { label: '状态', value: (r) => (r.refund ? '完全退款' : '未转化') }
+    { label: '状态', value: (r) => (r.refund ? '完全退款' : '未转化') },
+    { label: '未转化原因', value: (r) => { const x = (Rec.uncvReasons || {})[String(r.userId || '').trim()]; return x ? x.text : ''; } }
   ]);
   toast(`已导出 ${rows.length} 条未转化名单`, 'ok');
+}
+
+/* ---------------- 接leads已转化明细（仅管理员可见，leads 命中订单池且累计转化金额>0） ---------------- */
+
+function lconvRows() {
+  const p = Rec.uncvPerf;
+  if (!p) return [];
+  return p.converted || [];
+}
+
+function lconvFiltered() {
+  const v = Rec.lconv;
+  const q = String(v.q || '').trim().toLowerCase();
+  const from = String(v.from || '').replace('T', ' ').trim();
+  const to = String(v.to || '').replace('T', ' ').trim();
+  return lconvRows().filter((r) => {
+    const t = String(r.time || r.month || '').replace('T', ' ');
+    if (from && (!t || t < from)) return false;
+    if (to && (!t || t > to)) return false;
+    if (v.base !== 'all' && (r.base || '') !== v.base) return false;
+    if (q && !`${r.userId} ${r.ccId} ${r.empId} ${r.base}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+async function loadLconv() {
+  const perfDs = perfDataset();
+  const card = $('#lconvCard');
+  if (!perfDs) {
+    card.innerHTML = '<div class="card-body"><div class="empty"><h3>暂无业绩底表</h3><p>接leads已转化明细需要先上传 leads 分配表与哥伦布订单池</p></div></div>';
+    return;
+  }
+  if (!Rec.uncv.loaded) {
+    card.innerHTML = '<div class="card-body"><div class="skeleton sk-line"></div></div>';
+    try {
+      const p = (await api(`/api/rankings?dataset=${perfDs.id}&range=all`)).perf;
+      Rec.uncvPerf = p;
+      Rec.uncv.loaded = true;
+      Rec.uncvCount = (p.stats || {}).unconvertedCount || 0;
+      Rec.lconvCount = (p.stats || {}).convertedCount || 0;
+      renderDatasetTabs();
+    } catch (err) {
+      card.innerHTML = `<div class="card-body"><div class="empty"><h3>加载失败</h3><p>${esc(err.message)}</p></div></div>`;
+      return;
+    }
+  }
+  renderLconv();
+}
+
+function renderLconv() {
+  const p = Rec.uncvPerf || {};
+  const st = p.stats || {};
+  const v = Rec.lconv;
+  const all = lconvRows();
+  const filtered = lconvFiltered();
+  const shown = filtered.slice(0, v.limit);
+  const bases = [...new Set(all.map((r) => r.base || '').filter(Boolean))].sort();
+  const baseOpts = '<option value="all">全部基地</option>' + bases.map((b) => `<option value="${esc(b)}" ${v.base === b ? 'selected' : ''}>${esc(b)}</option>`).join('');
+
+  const rowsHtml = shown.map((r) => `
+    <tr>
+      <td class="num">${esc(r.time || r.month || '—')}</td>
+      <td class="num">${esc(r.userId || '—')}</td>
+      <td>${esc(r.base || '未匹配')}</td>
+      <td class="cell-left">${esc(r.ccId || '—')}</td>
+      <td class="num">${esc(r.empId || '—')}</td>
+      <td class="num"><b>${fmtCompact(r.amount || 0, 'money')}</b></td>
+      <td>${r.refund ? '<span class="tag-refund">曾完全退款</span>' : '<span class="tag-done">已转化</span>'}</td>
+    </tr>`).join('');
+
+  $('#pageSubtitle').textContent = '接leads已转化明细 · 仅管理员可见：leads 分配表命中订单池且累计转化金额 > 0 的名单（与接例子未转化互斥）';
+  $('#lconvCard').innerHTML = `
+    <div class="card-body" style="border-bottom:1px solid var(--line)">
+      <div class="records-toolbar" style="margin-bottom:0">
+        <div class="field"><label>起止时间</label>
+          <div class="date-range">
+            <input class="control" id="lconvFrom" type="datetime-local" step="1" value="${esc(v.from)}">
+            <span class="range-sep">~</span>
+            <input class="control" id="lconvTo" type="datetime-local" step="1" value="${esc(v.to)}">
+          </div>
+        </div>
+        <div class="field"><label>基地</label>
+          <select class="control" id="lconvBase" style="width:120px">${baseOpts}</select>
+        </div>
+        <div class="field grow"><label>搜索</label>
+          <input class="control search" id="lconvSearch" placeholder="搜索用户ID / CCid / 工号 / 基地" value="${esc(v.q)}">
+        </div>
+        <div class="spacer"></div>
+        <span class="records-summary">已转化 <b>${fmtInt(st.convertedCount || 0)}</b> 条 · 累计金额 <b>${fmtCompact(st.convertedAmount || 0, 'money')}</b> · 当前展示 ${fmtInt(filtered.length)} 条</span>
+        <button class="btn btn-sm" id="lconvReset" type="button">重置</button>
+      </div>
+    </div>
+    <div class="table-wrap" style="max-height:62vh">
+      <table class="table">
+        <thead><tr><th>分配时间</th><th>用户ID</th><th>基地</th><th>CCid</th><th>绑定工号</th><th>累计转化金额</th><th>状态</th></tr></thead>
+        <tbody>${rowsHtml || `<tr><td colspan="7"><div class="empty"><h3>当前筛选条件下暂无已转化数据</h3><p>调整筛选条件后重试</p></div></td></tr>`}</tbody>
+      </table>
+    </div>
+    <div class="table-footer">
+      <span>${filtered.length > shown.length ? `已显示前 ${fmtInt(shown.length)} 条` : `共 ${fmtInt(filtered.length)} 条`}</span>
+      ${filtered.length > shown.length ? '<button class="btn btn-sm" id="lconvMore" type="button">显示更多</button>' : ''}
+    </div>`;
+
+  $('#lconvFrom').addEventListener('change', (e) => { v.from = e.target.value; v.limit = 200; renderLconv(); });
+  $('#lconvTo').addEventListener('change', (e) => { v.to = e.target.value; v.limit = 200; renderLconv(); });
+  $('#lconvBase').addEventListener('change', (e) => { v.base = e.target.value; v.limit = 200; renderLconv(); });
+  $('#lconvSearch').addEventListener('input', debounce((e) => { v.q = e.target.value; v.limit = 200; renderLconv(); }, 250));
+  $('#lconvReset').addEventListener('click', () => {
+    Rec.lconv = { from: '', to: '', base: 'all', q: '', limit: 200 };
+    renderLconv();
+  });
+  const more = $('#lconvMore');
+  if (more) more.addEventListener('click', () => { v.limit += 500; renderLconv(); });
+}
+
+function exportLconv() {
+  const rows = lconvFiltered();
+  downloadCsv('接leads已转化明细.csv', rows, [
+    { label: '分配时间', value: (r) => r.time || r.month || '' },
+    { label: '用户ID', value: (r) => r.userId || '' },
+    { label: '基地', value: (r) => r.base || '未匹配' },
+    { label: 'CCid', value: (r) => r.ccId || '' },
+    { label: '绑定工号', value: (r) => r.empId || '' },
+    { label: '累计转化金额', value: (r) => r.amount || 0 },
+    { label: '状态', value: (r) => (r.refund ? '曾完全退款' : '已转化') }
+  ]);
+  toast(`已导出 ${rows.length} 条已转化明细`, 'ok');
 }
 
 /* ---------------- 直推未转化视图（转介绍转化跟踪 · 跟进状态口径） ---------------- */
@@ -1202,8 +1393,7 @@ function renderTable() {
   $('#recordsSummary').textContent = `共 ${fmtInt(d.total)} 条`;
   $('#pageInfo').textContent = d.total ? `第 ${d.page} / ${d.pages} 页 · 每页 ${d.pageSize} 条` : '—';
   renderPager(d);
-  const kocBtns = $('#kocCfgBtns');
-  if (kocBtns) kocBtns.style.display = isKocDataset() && Rec.user.role === 'admin' ? '' : 'none';
+  // 2.12 KOC 分层配置按钮已迁移至后台「展示配置」（仅管理员）
 
   $$('#recordsTable [data-idx]').forEach((tr) => {
     tr.addEventListener('click', () => openDrawer(d.rows[Number(tr.dataset.idx)]));
@@ -1280,96 +1470,6 @@ function openDrawer(r) {
 function closeDrawer() {
   $('#drawerBackdrop').classList.remove('open');
   $('#drawer').classList.remove('open');
-}
-
-/* ---------------- KOC 分层设置（阈值 / 颜色，仅管理员） ---------------- */
-async function saveKocConfig(body) {
-  try {
-    const r = await api('/api/admin/koc-config', { method: 'POST', body: { datasetId: Rec.dataset, ...body } });
-    const ds = Rec.datasets.find((x) => x.id === Rec.dataset);
-    if (ds) ds.kocConfig = r.config;
-    closeModal();
-    load();
-    const summary = Object.entries(r.counts || {}).map(([k, v]) => `${k} ${fmtInt(v)}`).join(' · ');
-    toast(`已保存并重算：${summary}`, 'ok');
-  } catch (err) {
-    toast(err.message, 'err');
-  }
-}
-
-function openKocTierModal() {
-  if (Rec.user.role !== 'admin') return;
-  const cfg = kocCfg();
-  openModal({
-    title: '划分层级设置',
-    subtitle: '按「累计新正价用户数量」划分名单层级，保存后全表自动重算',
-    body: `
-      <div class="form-grid">
-        <div class="form-field"><label>最高层级阈值（累计新正价用户数量 ≥ 此值）</label>
-          <input class="control" id="kocT1" type="number" min="1" step="1" value="${cfg.t1}"></div>
-        <div class="form-field"><label>第二层阈值（≥ 此值且低于最高层级阈值）</label>
-          <input class="control" id="kocT2" type="number" min="0" step="1" value="${cfg.t2}"></div>
-      </div>
-      <div class="alert" style="margin-top:14px">
-        ${icon('info', 15)}
-        <div>分层规则：<b>最高层级</b> = 累计新正价 ≥ 最高阈值（如填 <b>10</b>，则累计新正价大于等于 10 的用户为最高层级）；<b>第二层</b> = 累计新正价 ≥ 第二阈值且未达最高层；<b>26年推荐成功</b> = 26年新正价 &gt; 0 且不在前两层；其余为<b>未入选</b>。重合备注 = 累计新正价 ≥ 第二阈值 且 26年新正价 &gt; 0。</div>
-      </div>`,
-    footer: `
-      <button class="btn" id="kocTierCancel" type="button">取消</button>
-      <button class="btn btn-primary" id="kocTierSave" type="button">保存并重算</button>`,
-    onMount: (box) => {
-      box.querySelector('#kocTierCancel').addEventListener('click', closeModal);
-      box.querySelector('#kocTierSave').addEventListener('click', () => {
-        const t1 = parseInt(box.querySelector('#kocT1').value, 10);
-        const t2 = parseInt(box.querySelector('#kocT2').value, 10);
-        if (!Number.isFinite(t1) || t1 < 1) { toast('最高层级阈值必须是不小于 1 的整数', 'err'); return; }
-        saveKocConfig({ t1, t2: Number.isFinite(t2) ? t2 : 0, colors: {} });
-      });
-    }
-  });
-}
-
-function openKocColorModal() {
-  if (Rec.user.role !== 'admin') return;
-  const cfg = kocCfg();
-  const items = [
-    ['t1', `最高层级（当前：历史累计≥${cfg.t1}）`, cfg.colors.t1],
-    ['t2', `第二层（当前：历史累计${cfg.t2}-${cfg.t1}）`, cfg.colors.t2],
-    ['t3', '26年推荐成功', cfg.colors.t3],
-    ['t4', '未入选', cfg.colors.t4]
-  ];
-  openModal({
-    title: '层级颜色设置',
-    subtitle: '为各 KOC 层级标签挑选颜色，保存后立即生效',
-    body: `
-      <div class="form-grid">
-        ${items.map(([k, label, hex]) => `
-          <div class="form-field"><label>${esc(label)}</label>
-            <div style="display:flex;align-items:center;gap:10px">
-              <input type="color" id="kocColor_${k}" value="${hex}" style="width:44px;height:34px;padding:2px;border:1px solid var(--line);border-radius:8px;background:#fff;cursor:pointer">
-              <span class="mono text-sm muted">${hex}</span>
-            </div>
-          </div>`).join('')}
-      </div>
-      <div class="alert" style="margin-top:14px">
-        ${icon('info', 15)}
-        <div>标签底色与文字颜色会按所选颜色自动生成淡色样式。</div>
-      </div>`,
-    footer: `
-      <button class="btn" id="kocColorCancel" type="button">取消</button>
-      <button class="btn btn-primary" id="kocColorSave" type="button">保存颜色</button>`,
-    onMount: (box) => {
-      box.querySelector('#kocColorCancel').addEventListener('click', closeModal);
-      box.querySelector('#kocColorSave').addEventListener('click', () => {
-        const colors = {};
-        items.forEach(([k]) => {
-          const v = box.querySelector(`#kocColor_${k}`).value;
-          if (/^#[0-9a-fA-F]{6}$/.test(v)) colors[k] = v;
-        });
-        saveKocConfig({ t1: cfg.t1, t2: cfg.t2, colors });
-      });
-    }
-  });
 }
 
 /* =========================================================================
@@ -1551,6 +1651,200 @@ function exportKtier() {
 }
 
 /* =========================================================================
+   业绩页签（原业绩排行页并入）：由 rankings.js 提供 initRankings / Rank.load
+   ========================================================================= */
+
+let rankInited = false;
+
+function loadRankView() {
+  const card = $('#rankCard');
+  if (!card) return;
+  if (!perfDataset()) {
+    card.innerHTML = '<div class="card-body"><div class="empty"><h3>暂无业绩底表</h3><p>业绩榜单需要先在后台上传有数业绩完成度等业绩底表</p></div></div>';
+    return;
+  }
+  $('#pageSubtitle').textContent = '业绩榜单 · 高经 / 经理 / 销售三榜 · 按取数逻辑实时计算；鼠标悬停数字可查看计算公式，移开即隐藏';
+  if (!rankInited) {
+    rankInited = true;
+    initRankings({ user: Rec.user, datasets: Rec.datasets, settings: Rec.settings });
+  } else {
+    loadRank();
+  }
+}
+
+/* =========================================================================
+   钻石兑换与使用明细（合并页签）：兑换名明细 / 钻石使用明细 两个按钮切换
+   ========================================================================= */
+
+function loadDmd2() {
+  $('#pageSubtitle').textContent = '钻石兑换与使用明细 · 「兑换名明细」=已转化订单与应发放钻石；「钻石使用明细」=老用户钻石发放/消耗/剩余（解冻：正价课满30天未退）';
+  renderDmd2();
+  if (Rec.dmd2.mode === 'orders') loadDiamondOrders();
+  else loadDiamond();
+}
+
+function renderDmd2() {
+  const ordersBtn = $('#dmd2BtnOrders');
+  const usageBtn = $('#dmd2BtnUsage');
+  const p1 = $('#dmdPanel');
+  const p2 = $('#diamondPanel');
+  if (!ordersBtn) return;
+  const mode = Rec.dmd2.mode;
+  ordersBtn.classList.toggle('btn-primary', mode === 'orders');
+  usageBtn.classList.toggle('btn-primary', mode === 'usage');
+  if (p1) p1.style.display = mode === 'orders' ? 'block' : 'none';
+  if (p2) p2.style.display = mode === 'usage' ? 'block' : 'none';
+  const src = (mode === 'orders' ? (Rec.dmdData || {}).summary : (Rec.diamondData || {}).summary) || {};
+  const sub = $('#dmd2Sub');
+  if (sub) {
+    sub.innerHTML = mode === 'orders'
+      ? `兑换名明细 · 转化订单 <b>${fmtInt(src.orders || 0)}</b> 笔 · 转化金额合计 <b>${fmtMoney(src.amount || 0)}</b> · 销售 <b>${fmtInt(src.emps || 0)}</b> 人`
+      : `钻石使用明细 · 未消耗 <b style="color:#b45309">${fmtInt(src.unused || 0)}</b> · 部分消耗 ${fmtInt(src.partial || 0)} · 剩余钻石 <b>${fmtInt(src.restTotal || 0)}</b>`;
+  }
+}
+
+/* =========================================================================
+   直推转化明细（原直推未转化页签）：转介绍转化跟踪全量行
+   表头：序号/转介绍日期/高经/经理/主管/组长/销售姓名/工号/A/B/C/活动id/转化年级/转化金额
+   ========================================================================= */
+
+function loadDdetail() {
+  const card = $('#ddetailCard');
+  if (!card) return;
+  if (!Rec.ddetailData) {
+    card.innerHTML = '<div class="card-body"><div class="skeleton sk-line"></div></div>';
+    api('/api/direct-detail').then((d) => {
+      Rec.ddetailData = d;
+      Rec.ddetailCount = (d.summary || {}).total || 0;
+      renderDatasetTabs();
+      renderDdetail();
+    })
+      .catch((err) => { card.innerHTML = `<div class="card-body"><div class="empty"><h3>加载失败</h3><p>${esc(err.message)}</p></div></div>`; });
+    return;
+  }
+  renderDdetail();
+}
+
+function ddetailRows() {
+  const d = Rec.ddetailData;
+  if (!d) return [];
+  let rows = d.rows || [];
+  if (Rec.user.role === 'base' && Rec.user.baseName) {
+    const norm = (x) => String(x || '').trim().replace(/基地$/, '');
+    const mine = norm(Rec.user.baseName);
+    rows = rows.filter((r) => norm(r.base) === mine);
+  }
+  return rows;
+}
+
+function ddetailFiltered() {
+  const v = Rec.ddetail;
+  const q = String(v.q || '').trim().toLowerCase();
+  const from = String(v.from || '').trim();
+  const to = String(v.to || '').trim();
+  return ddetailRows().filter((r) => {
+    const t = String(r.introDate || '').slice(0, 10);
+    if (from && t && t < from) return false;
+    if (to && t && t > to) return false;
+    if (v.base !== 'all' && (r.base || '') !== v.base) return false;
+    if (q && !`${r.empName} ${r.empId} ${r.gj} ${r.jl} ${r.zg} ${r.zz} ${r.a} ${r.b} ${r.c} ${r.activityId} ${r.grade} ${r.base}`.toLowerCase().includes(q)) return false;
+    return true;
+  });
+}
+
+function renderDdetail() {
+  const card = $('#ddetailCard');
+  if (!card) return;
+  const v = Rec.ddetail;
+  const src = Rec.ddetailData || {};
+  const sum = src.summary || {};
+  const all = ddetailRows();
+  const filtered = ddetailFiltered();
+  const shown = filtered.slice(0, v.limit);
+  const bases = [...new Set(all.map((r) => r.base || '').filter(Boolean))].sort();
+  const baseOpts = '<option value="all">全部基地</option>' + bases.map((b) => `<option value="${esc(b)}" ${v.base === b ? 'selected' : ''}>${esc(b)}</option>`).join('');
+
+  $('#pageSubtitle').textContent = '直推转化明细 · 转介绍转化跟踪全量明细（按转介绍日期倒序）；转化金额>0 即已转化';
+
+  const listRows = shown.map((r) => `<tr>
+      <td class="num muted">${r.seq}</td>
+      <td class="num nowrap">${esc(r.introDate || '—')}</td>
+      <td>${esc(r.gj || '—')}</td>
+      <td>${esc(r.jl || '—')}</td>
+      <td>${esc(r.zg || '—')}</td>
+      <td>${esc(r.zz || '—')}</td>
+      <td class="strong">${esc(r.empName || '—')}</td>
+      <td class="num">${esc(r.empId || '—')}</td>
+      <td class="num text-sm muted" style="max-width:150px;word-break:break-all">${esc(r.a || '—')}</td>
+      <td class="num text-sm muted" style="max-width:150px;word-break:break-all">${esc(r.b || '—')}</td>
+      <td class="num text-sm muted" style="max-width:150px;word-break:break-all">${esc(r.c || '—')}</td>
+      <td class="num text-sm">${esc(r.activityId || '—')}</td>
+      <td>${esc(r.grade || '—')}</td>
+      <td class="num nowrap">${r.amount > 0 ? `<b>${fmtMoney(r.amount)}</b>` : '<span class="muted">—</span>'}</td>
+    </tr>`).join('');
+
+  card.innerHTML = `
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+      <div><h3>直推转化明细</h3><p class="records-summary">明细 <b>${fmtInt(sum.total || 0)}</b> 条 · 已转化 <b>${fmtInt(sum.converted || 0)}</b> 条 · 转化金额合计 <b>${fmtMoney(sum.amount || 0)}</b></p></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" id="ddReset" type="button">${icon('rotate', 13)} 重置</button>
+        <button class="btn btn-sm" id="ddExport" type="button">${icon('download', 13)} 导出</button>
+      </div>
+    </div>
+    <div class="card-body records-toolbar" style="border-bottom:1px solid var(--line)">
+      <div class="field"><label>转介绍日期</label>
+        <div class="date-range" style="display:inline-flex;align-items:center;gap:4px;border:1px solid var(--line);border-radius:8px;padding:2px 6px;background:var(--surface)">
+          <input class="control" id="ddFrom" type="date" value="${esc(String(v.from).slice(0, 10))}" style="width:135px;border:none;background:transparent">
+          <span class="muted">~</span>
+          <input class="control" id="ddTo" type="date" value="${esc(String(v.to).slice(0, 10))}" style="width:135px;border:none;background:transparent">
+        </div>
+      </div>
+      <div class="field"><label>基地</label>
+        <select class="control" id="ddBase" style="width:130px">${baseOpts}</select>
+      </div>
+      <div class="field grow"><label>搜索</label>
+        <input class="control search" id="ddSearch" placeholder="姓名 / 工号 / 高经 / 经理 / A·B·C / 活动id" value="${esc(v.q)}">
+      </div>
+    </div>
+    <div class="card-body" style="padding:0">
+      <table class="table">
+        <thead><tr><th>序号</th><th>转介绍日期</th><th>高经</th><th>经理</th><th>主管</th><th>组长</th><th>销售姓名</th><th>工号</th><th>A</th><th>B</th><th>C</th><th>活动id</th><th>转化年级</th><th>转化金额</th></tr></thead>
+        <tbody>${listRows || '<tr><td colspan="14"><div class="empty"><h3>当前筛选条件下暂无数据</h3></div></td></tr>'}</tbody>
+      </table>
+      <div class="table-footer"><span>共 ${fmtInt(filtered.length)} 条${filtered.length > shown.length ? ` · 显示前 ${fmtInt(shown.length)} 条` : ''} · 按转介绍日期倒序 · 转化金额>0 即已转化</span></div>
+    </div>`;
+
+  const bind = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  bind('#ddFrom', 'change', () => { v.from = $('#ddFrom').value; renderDdetail(); });
+  bind('#ddTo', 'change', () => { v.to = $('#ddTo').value; renderDdetail(); });
+  bind('#ddBase', 'change', (e) => { v.base = e.target.value; renderDdetail(); });
+  bind('#ddSearch', 'input', debounce(() => { v.q = $('#ddSearch').value.trim(); renderDdetail(); }, 300));
+  bind('#ddReset', 'click', () => { Rec.ddetail = { from: '', to: '', base: 'all', q: '', limit: 300 }; renderDdetail(); });
+  bind('#ddExport', 'click', exportDdetail);
+}
+
+function exportDdetail() {
+  const rows = ddetailFiltered();
+  downloadCsv('直推转化明细.csv', rows, [
+    { label: '序号', value: (r) => r.seq },
+    { label: '转介绍日期', value: (r) => r.introDate },
+    { label: '高经', value: (r) => r.gj },
+    { label: '经理', value: (r) => r.jl },
+    { label: '主管', value: (r) => r.zg },
+    { label: '组长', value: (r) => r.zz },
+    { label: '销售姓名', value: (r) => r.empName },
+    { label: '工号', value: (r) => r.empId },
+    { label: 'A', value: (r) => r.a },
+    { label: 'B', value: (r) => r.b },
+    { label: 'C', value: (r) => r.c },
+    { label: '活动id', value: (r) => r.activityId },
+    { label: '转化年级', value: (r) => r.grade },
+    { label: '转化金额', value: (r) => r.amount }
+  ]);
+  toast(`已导出 ${rows.length} 条直推转化明细`, 'ok');
+}
+
+/* =========================================================================
    2.7 钻石未使用视图
    ========================================================================= */
 
@@ -1586,7 +1880,7 @@ function diamondStateTag(s) {
 }
 
 function loadDiamond() {
-  const card = $('#diamondCard');
+  const card = $('#diamondPanel');
   if (!card) return;
   if (!Rec.diamondData) {
     card.innerHTML = '<div class="card-body"><div class="skeleton sk-line"></div></div>';
@@ -1598,7 +1892,7 @@ function loadDiamond() {
 }
 
 function renderDiamond() {
-  const card = $('#diamondCard');
+  const card = $('#diamondPanel');
   if (!card) return;
   const v = Rec.diamond;
   const src = Rec.diamondData || {};
@@ -2031,7 +2325,7 @@ function dmdFiltered() {
 }
 
 function loadDiamondOrders() {
-  const card = $('#dmdCard');
+  const card = $('#dmdPanel');
   if (!card) return;
   if (!Rec.dmdData) {
     card.innerHTML = '<div class="card-body"><div class="skeleton sk-line"></div></div>';
@@ -2043,7 +2337,7 @@ function loadDiamondOrders() {
 }
 
 function renderDiamondOrders() {
-  const card = $('#dmdCard');
+  const card = $('#dmdPanel');
   if (!card) return;
   const v = Rec.dmd;
   const src = Rec.dmdData || {};

@@ -82,7 +82,7 @@ function createBoard(root, opts) {
     if (from) p.set('from', from);
     if (to) p.set('to', to);
     if (extra.q) p.set('q', extra.q);
-    return `/records?${p.toString()}`;
+    return `records.html?${p.toString()}`;
   }
 
   function goRecords(extra = {}) {
