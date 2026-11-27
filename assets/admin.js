@@ -27,6 +27,7 @@ const VIEW_META = {
   org: { title: '销售架构', sub: '按工号匹配最新管理架构，底表数据才能落到高经 / 团队维度', icon: 'users' },
   tutor: { title: '辅导架构', sub: '辅导老师归属关系管理，按基地 / 主管 / 层级 / 在职状态筛选查看', icon: 'users' },
   targets: { title: '业绩目标', sub: '高经团队目标与经理团队目标上传维护，用于直推业绩完成度计算', icon: 'target' },
+  gjteam: { title: '高经归属', sub: '高经团队业绩的经理勾选映射与经理列 null 归属规则维护，调整后前台「高经团队」视图即时生效', icon: 'users' },
   settings: { title: '展示配置', sub: '前台标题、公告、KPI 与明细列开关，保存后立即生效', icon: 'sliders' },
   accounts: { title: '账号与权限', sub: '管理员维护数据与账号，基地账号只能查看本基地看板；含基地管理', icon: 'shield' },
   audit: { title: '操作日志', sub: '版本管理与切换、底表状态、操作留痕', icon: 'history' }
@@ -96,6 +97,7 @@ function go(view) {
     org: renderOrg,
     tutor: renderTutor,
     targets: renderTargets,
+    gjteam: renderGjteamView,
     settings: renderSettings,
     accounts: renderAccounts,
     audit: renderAudit
@@ -3250,6 +3252,187 @@ async function refreshBootstrap() {
     settings: b.settings, versions: b.versions || [], activeVersionId: b.activeVersionId || ''
   });
   $('#dsCount').textContent = App.datasets.length;
+}
+
+/* ---------------------------------------------------------------- 高经归属（2.9 高经团队业绩配置） */
+
+const gjState = { data: null, base: '', gj: '', picked: [], includeSelf: false, ruleSource: 'ys', ruleBase: '' };
+
+async function renderGjteamView() {
+  $('#topActions').innerHTML = '';
+  $('#view-gjteam').innerHTML = `
+    <div class="alert">
+      ${icon('info', 15)}
+      <div><b>高经团队业绩 = Σ 勾选经理业绩 + 本人在经理层的业绩</b>，双口径（直推 / 接leads）各自闭环。经理列=null 的行按下方「null 归属规则」计入对应高经的直管桶；经理列为"/"的脏数据行不会计入任何数字。历史业绩按成交行固化，经理跨基地调动时两个基地各算各的行，不会重复计。</div>
+    </div>
+    <div id="gjAdmBody" style="margin-top:14px"><div class="skeleton sk-line" style="height:60px"></div></div>`;
+
+  try {
+    gjState.data = await api('/api/gj-team');
+  } catch (err) {
+    $('#gjAdmBody').innerHTML = `<div class="alert err">${icon('alert', 15)}<div>${esc(err.message)}</div></div>`;
+    return;
+  }
+  const baseNames = Object.keys((gjState.data || {}).bases || {});
+  if (!baseNames.length) {
+    $('#gjAdmBody').innerHTML = '<div class="card"><div class="card-body"><div class="empty"><h3>暂无数据</h3><p>有数完成度或转介绍转化跟踪底表未上传</p></div></div></div>';
+    return;
+  }
+  gjState.base = gjState.base && baseNames.includes(gjState.base) ? gjState.base : baseNames[0];
+  const gjs = gjState.data.bases[gjState.base].gjs || [];
+  if (!gjs.some((x) => x.name === gjState.gj)) gjState.gj = gjs.length ? gjs[0].name : '';
+  if (!['ys', 'dc'].includes(gjState.ruleSource)) gjState.ruleSource = 'ys';
+  if (!baseNames.includes(gjState.ruleBase)) gjState.ruleBase = gjState.base;
+  renderGjteamAdmin();
+}
+
+function renderGjteamAdmin() {
+  const d = gjState.data || {};
+  const bases = d.bases || {};
+  const baseNames = Object.keys(bases);
+  const b = bases[gjState.base] || { gjs: [], mgrs: [] };
+  const gjs = b.gjs || [];
+  const saved = ((d.selections || {})[gjState.base + '|' + gjState.gj]) || null;
+  const rules = d.nullRules || [];
+  const fmtN = (n) => '¥' + Math.round(n).toLocaleString('zh-CN');
+
+  // 经理勾选列表
+  const mgrRows = (b.mgrs || []).map((m) => {
+    const on = gjState.picked.includes(m.name);
+    return `<label style="display:flex;align-items:center;gap:8px;padding:6px 10px;border-bottom:1px solid var(--line);cursor:pointer;${on ? 'background:#eff6ff' : ''}">
+      <input type="checkbox" class="gjadm-mgr" value="${esc(m.name)}" ${on ? 'checked' : ''}>
+      <b>${esc(m.name)}</b><span class="num muted" style="font-size:11px">${esc(m.empId || '—')}</span>
+      <span class="muted" style="font-size:11px;margin-left:auto">直推 ${m.ys.n}行 ${fmtN(m.ys.amt)} · leads ${m.dc.n}单 ${fmtN(m.dc.amt)}</span>
+    </label>`;
+  }).join('') || '<div class="muted" style="padding:12px">该基地暂无经理数据</div>';
+
+  // 当前映射表
+  const selRows = Object.entries(d.selections || {}).map(([k, s]) => `
+    <tr>
+      <td class="strong">${esc(s.gjName)}</td>
+      <td>${esc(s.base)}</td>
+      <td>${esc(s.mgrs.join('、') || '—')}${s.includeSelf ? ' <span class="badge blue">+本人直管</span>' : ''}</td>
+      <td class="muted">${esc(s.by || '—')} · ${esc(s.at || '—')}</td>
+    </tr>`).join('') || '<tr><td colspan="4" class="muted" style="text-align:center;padding:18px">尚未配置任何归属映射</td></tr>';
+
+  // 规则表
+  const SRC_LABEL = { ys: '直推', dc: '接leads' };
+  const ruleRows = rules.map((r) => `
+    <tr>
+      <td>${SRC_LABEL[r.source] || esc(r.source)}</td>
+      <td>${esc(r.base)}</td>
+      <td class="strong">${esc(r.targetName)}${r.targetEmpId ? ` <span class="num muted">${esc(r.targetEmpId)}</span>` : ''}</td>
+      <td>${r.enabled ? '<span class="badge green">启用</span>' : '<span class="muted">停用</span>'}</td>
+      <td class="muted">${esc(r.by || '—')} · ${esc(r.at || '—')}</td>
+      <td><button class="btn btn-sm" type="button" data-del-rule="${esc(r.id)}">删除</button></td>
+    </tr>`).join('') || '<tr><td colspan="6" class="muted" style="text-align:center;padding:18px">暂无规则（经理列=null 的行将全部待指定，不计入任何高经）</td></tr>';
+
+  $('#gjAdmBody').innerHTML = `
+    <section class="card">
+      <div class="card-head">
+        <div><h2><span class="head-icon blue">${icon('users', 14)}</span>经理归属映射（选择经理并核算）</h2>
+        <p class="sub">勾选该高经名下的经理与「本人直管」，保存后前台「明细名单 → 高经团队」即时生效</p></div>
+      </div>
+      <div class="card-body" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;border-bottom:1px solid var(--line)">
+        <div class="field"><label>基地</label>
+          <select class="control" id="gjAdmBase" style="width:140px">${baseNames.map((x) => `<option value="${esc(x)}" ${x === gjState.base ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>
+        <div class="field"><label>高经</label>
+          <select class="control" id="gjAdmGj" style="width:200px">${gjs.map((x) => `<option value="${esc(x.name)}" ${x.name === gjState.gj ? 'selected' : ''}>${esc(x.name)}${x.empId ? ' ' + esc(x.empId) : ''}</option>`).join('')}</select></div>
+        <label class="field" style="gap:6px;cursor:pointer"><input type="checkbox" id="gjAdmSelf" ${gjState.includeSelf ? 'checked' : ''}><span style="font-size:13px">计入本人直管（经理列=本人的行）</span></label>
+        <button class="btn btn-primary btn-sm" id="gjAdmSave" type="button">${icon('check', 14)}保存映射并核算</button>
+        ${saved ? `<span class="muted" style="font-size:12px">当前：${saved.mgrs.length} 位经理${saved.includeSelf ? ' + 本人' : ''}（${esc(saved.by)} · ${esc(saved.at)}）</span>` : '<span class="muted" style="font-size:12px">尚未配置</span>'}
+      </div>
+      <div class="table-wrap" style="max-height:360px">${mgrRows}</div>
+      <div class="table-wrap" style="max-height:280px;border-top:1px solid var(--line)">
+        <table class="table"><thead><tr><th>高经</th><th>基地</th><th>归属经理</th><th>调整记录</th></tr></thead><tbody>${selRows}</tbody></table>
+      </div>
+    </section>
+    <section class="card" style="margin-top:14px">
+      <div class="card-head">
+        <div><h2><span class="head-icon amber">${icon('spark', 14)}</span>null 归属规则（经理列=null 的行归谁）</h2>
+        <p class="sub">按数据源分开维护：直推（有数完成度）与接leads（转化跟踪）各基地各一条；删除规则后对应行回到「待指定」</p></div>
+      </div>
+      <div class="card-body" style="display:flex;gap:12px;flex-wrap:wrap;align-items:flex-end;border-bottom:1px solid var(--line)">
+        <div class="field"><label>数据源</label>
+          <select class="control" id="gjAdmRuleSrc" style="width:120px">
+            <option value="ys" ${gjState.ruleSource === 'ys' ? 'selected' : ''}>直推</option>
+            <option value="dc" ${gjState.ruleSource === 'dc' ? 'selected' : ''}>接leads</option>
+          </select></div>
+        <div class="field"><label>基地</label>
+          <select class="control" id="gjAdmRuleBase" style="width:140px">${baseNames.map((x) => `<option value="${esc(x)}" ${x === gjState.ruleBase ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select></div>
+        <div class="field"><label>归属高经</label>
+          <select class="control" id="gjAdmRuleTarget" style="width:200px">${((bases[gjState.ruleBase] || {}).gjs || []).map((x) => `<option value="${esc(x.name)}">${esc(x.name)}${x.empId ? ' ' + esc(x.empId) : ''}</option>`).join('')}</select></div>
+        <button class="btn btn-primary btn-sm" id="gjAdmRuleSave" type="button">${icon('check', 14)}保存规则</button>
+      </div>
+      <div class="table-wrap">
+        <table class="table"><thead><tr><th>数据源</th><th>基地</th><th>归属高经</th><th>状态</th><th>调整记录</th><th></th></tr></thead><tbody>${ruleRows}</tbody></table>
+      </div>
+    </section>`;
+
+  $$('#gjAdmBody [id^=gjAdm]').forEach((el) => {
+    const id = el.id;
+    if (id === 'gjAdmBase') el.addEventListener('change', (e) => {
+      gjState.base = e.target.value; gjState.ruleBase = e.target.value;
+      const gjs2 = ((gjState.data.bases[gjState.base] || {}).gjs) || [];
+      gjState.gj = gjs2.length ? gjs2[0].name : '';
+      const saved2 = ((gjState.data.selections || {})[gjState.base + '|' + gjState.gj]) || null;
+      gjState.picked = saved2 ? [...saved2.mgrs] : [];
+      gjState.includeSelf = saved2 ? !!saved2.includeSelf : false;
+      renderGjteamAdmin();
+    });
+    if (id === 'gjAdmGj') el.addEventListener('change', (e) => {
+      gjState.gj = e.target.value;
+      const saved2 = ((gjState.data.selections || {})[gjState.base + '|' + gjState.gj]) || null;
+      gjState.picked = saved2 ? [...saved2.mgrs] : [];
+      gjState.includeSelf = saved2 ? !!saved2.includeSelf : false;
+      renderGjteamAdmin();
+    });
+    if (id === 'gjAdmSelf') el.addEventListener('change', (e) => { gjState.includeSelf = e.target.checked; });
+    if (id === 'gjAdmSave') el.addEventListener('click', async () => {
+      const mgrs = $$('.gjadm-mgr').filter((x) => x.checked).map((x) => x.value);
+      try {
+        const r = await api('/api/gj-team/select', { method: 'POST', body: { base: gjState.base, gjName: gjState.gj, mgrs, includeSelf: gjState.includeSelf } });
+        gjState.data.selections[gjState.base + '|' + gjState.gj] = { base: gjState.base, gjName: gjState.gj, mgrs, includeSelf: gjState.includeSelf, at: (r.calc && r.calc.selection && r.calc.selection.at) || '', by: App.user.name };
+        const t = calcTotalText(r.calc);
+        toast(`已保存：${t}`, 'ok');
+        renderGjteamAdmin();
+      } catch (err) { toast(err.message, 'err'); }
+    });
+    if (id === 'gjAdmRuleSrc') el.addEventListener('change', (e) => { gjState.ruleSource = e.target.value; renderGjteamAdmin(); });
+    if (id === 'gjAdmRuleBase') el.addEventListener('change', (e) => { gjState.ruleBase = e.target.value; renderGjteamAdmin(); });
+    if (id === 'gjAdmRuleSave') el.addEventListener('click', async () => {
+      const target = $('#gjAdmRuleTarget');
+      const targetName = target ? target.value : '';
+      if (!targetName) { toast('该基地暂无高结名单，无法设置规则', 'err'); return; }
+      const gjs2 = ((gjState.data.bases[gjState.ruleBase] || {}).gjs) || [];
+      const hit = gjs2.find((x) => x.name === targetName) || {};
+      try {
+        const r = await api('/api/gj-team/nullrule', { method: 'POST', body: { source: gjState.ruleSource, base: gjState.ruleBase, targetName, targetEmpId: hit.empId || '', enabled: true } });
+        gjState.data.nullRules = r.nullRules;
+        toast('规则已保存，前台即时生效', 'ok');
+        renderGjteamAdmin();
+      } catch (err) { toast(err.message, 'err'); }
+    });
+  });
+  $$('#gjAdmBody [data-del-rule]').forEach((btn) => {
+    btn.addEventListener('click', async () => {
+      const rule = (gjState.data.nullRules || []).find((x) => x.id === btn.dataset.delRule);
+      if (!rule) return;
+      if (!confirm(`确认删除规则：${SRC_LABEL[rule.source] || rule.source} · ${rule.base} → ${rule.targetName}？删除后对应行回到待指定。`)) return;
+      try {
+        const r = await api('/api/gj-team/nullrule', { method: 'POST', body: { source: rule.source, base: rule.base, targetName: '' } });
+        gjState.data.nullRules = r.nullRules;
+        toast('规则已删除', 'ok');
+        renderGjteamAdmin();
+      } catch (err) { toast(err.message, 'err'); }
+    });
+  });
+}
+
+function calcTotalText(calc) {
+  if (!calc) return '';
+  const f = (n) => '¥' + Math.round(n).toLocaleString('zh-CN');
+  return `${calc.base} · ${calc.gjName}：直推 ${f(calc.total.ys.amt)}（${calc.total.ys.n}行）+ 接leads ${f(calc.total.dc.amt)}（${calc.total.dc.n}单）`;
 }
 
 boot();

@@ -43,7 +43,9 @@ const Rec = {
   dmd: { from: '', to: '', base: 'all', q: '', limit: 200 },
   dmdData: null, dmdCount: '',
   dragon: { board: 'A', period: '', me: '' },
-  dragonData: null, dragonCount: ''
+  dragonData: null, dragonCount: '',
+  gjteam: { base: '', gj: '', panelOpen: false, picked: [], includeSelf: false },
+  gjteamData: null
 };
 
 // 明细名单页隐藏的底表页签（业绩相关 + 已被专项视图替代的钻石底表）
@@ -66,6 +68,7 @@ function isKtier() { return Rec.dataset === '__ktier'; }
 function isDiamond() { return Rec.dataset === '__diamond'; }
 function isDiamondOrders() { return Rec.dataset === '__dmd'; }
 function isDragon() { return Rec.dataset === '__dragon'; }
+function isGjteam() { return Rec.dataset === '__gjteam'; }
 
 function highDataset() { return Rec.datasets.find((d) => d.id === 'ds_high') || null; }
 function diamondDataset() { return Rec.datasets.find((d) => d.id === 'ds_diamond') || null; }
@@ -98,6 +101,7 @@ async function recordsBoot() {
   else if (h.get('dataset') === '__diamond' && diamondDataset()) Rec.dataset = '__diamond';
   else if (h.get('dataset') === '__dmd' && diamondDataset()) Rec.dataset = '__dmd';
   else if (h.get('dataset') === '__dragon' && perfDataset()) Rec.dataset = '__dragon';
+  else if (h.get('dataset') === '__gjteam' && perfDataset()) Rec.dataset = '__gjteam';
   else if (h.get('dataset') && Rec.datasets.some((d) => d.id === h.get('dataset') && !HIDDEN_TAB_DATASETS.includes(d.id))) Rec.dataset = h.get('dataset');
   else Rec.dataset = ((Rec.datasets.find((d) => !HIDDEN_TAB_DATASETS.includes(d.id))) || Rec.datasets[0] || {}).id || '';
   if (!isBase && h.get('base')) Rec.base = h.get('base');
@@ -153,6 +157,11 @@ async function recordsBoot() {
       renderDragon();
       return;
     }
+    if (isGjteam()) {
+      Rec.gjteam = { base: Rec.gjteam.base, gj: '', panelOpen: false, picked: [], includeSelf: false };
+      renderGjteam();
+      return;
+    }
     Rec.base = 'all'; Rec.status = 'all'; Rec.q = ''; Rec.from = ''; Rec.to = ''; Rec.page = 1;
     $('#searchInput').value = '';
     $('#baseFilter').value = 'all';
@@ -167,6 +176,7 @@ async function recordsBoot() {
     if (isDiamond()) { exportDiamond(); return; }
     if (isDiamondOrders()) { exportDiamondOrders(); return; }
     if (isDragon()) { exportDragon(); return; }
+    if (isGjteam()) { exportGjteam(); return; }
     const p = new URLSearchParams({ dataset: Rec.dataset });
     if (Rec.base !== 'all') p.set('base', Rec.base);
     if (Rec.status !== 'all') p.set('status', Rec.status);
@@ -289,7 +299,9 @@ function renderDatasetTabs() {
     </button>` : '';
   const dragonTab = perfDataset() ? `
     <button class="table-tab ${isDragon() ? 'active' : ''}" data-ds="__dragon" type="button">龙珠奖</button>` : '';
-  $('#datasetTabs').innerHTML = tabs + uncvTab + duncvTab + chainTab + ktierTab + diamondTab + dmdTab + dragonTab;
+  const gjteamTab = perfDataset() ? `
+    <button class="table-tab ${isGjteam() ? 'active' : ''}" data-ds="__gjteam" type="button">高经团队</button>` : '';
+  $('#datasetTabs').innerHTML = tabs + uncvTab + duncvTab + chainTab + ktierTab + diamondTab + dmdTab + dragonTab + gjteamTab;
   $$('#datasetTabs [data-ds]').forEach((btn) => {
     btn.addEventListener('click', () => {
       Rec.dataset = btn.dataset.ds;
@@ -314,7 +326,7 @@ function writeUrl() {
   if (Rec.q) p.set('q', Rec.q);
   if (Rec.from) p.set('from', Rec.from);
   if (Rec.to) p.set('to', Rec.to);
-  history.replaceState(null, '', p.toString() ? `records.html?${p.toString()}` : 'records.html');
+  history.replaceState(null, '', p.toString() ? `/records?${p.toString()}` : '/records');
 }
 
 async function load() {
@@ -326,6 +338,7 @@ async function load() {
   if (isDiamond()) { toggleView('diamond'); loadDiamond(); return; }
   if (isDiamondOrders()) { toggleView('dmd'); loadDiamondOrders(); return; }
   if (isDragon()) { toggleView('dragon'); loadDragon(); return; }
+  if (isGjteam()) { toggleView('gjteam'); loadGjteam(); return; }
   toggleView('list');
   const p = new URLSearchParams({ dataset: Rec.dataset, page: Rec.page, pageSize: Rec.pageSize });
   if (Rec.base !== 'all') p.set('base', Rec.base);
@@ -365,6 +378,8 @@ function toggleView(mode) {
   if (dmd) dmd.classList.toggle('hidden', mode !== 'dmd');
   const dg = $('#dragonCard');
   if (dg) dg.classList.toggle('hidden', mode !== 'dragon');
+  const gjt = $('#gjteamCard');
+  if (gjt) gjt.classList.toggle('hidden', mode !== 'gjteam');
 }
 
 // 行时间键：优先精确到秒的 time，否则回退到月份（当月 1 日 0 点）
@@ -2117,6 +2132,332 @@ function exportDiamondOrders() {
     { label: '应发放钻石', value: () => '' }
   ]);
   toast(`已导出 ${rows.length} 笔明细（应发放钻石列待规则确认）`, 'ok');
+}
+
+/* =========================================================================
+   2.9 高经团队业绩（双口径数透：直推 + 接leads）
+   交互：高经下拉 → 弹出选择经理面板（含本人直管行/null 规则行/脏值行）→ 核算
+   口径：高经业绩 = Σ 勾选经理业绩 + 本人在经理层的业绩；两口径各自闭环
+   勾选映射按高经持久化（管理员可调，普通用户只读上次结果）
+   ========================================================================= */
+
+function loadGjteam() {
+  const card = $('#gjteamCard');
+  if (!card) return;
+  if (!Rec.gjteamData) {
+    card.innerHTML = '<div class="card-body"><div class="skeleton sk-line"></div></div>';
+    api('/api/gj-team').then((d) => { Rec.gjteamData = d; initGjteamState(); renderGjteam(); })
+      .catch((err) => { card.innerHTML = `<div class="card-body"><div class="empty"><h3>加载失败</h3><p>${esc(err.message)}</p></div></div>`; });
+    return;
+  }
+  initGjteamState();
+  renderGjteam();
+}
+
+function initGjteamState() {
+  const d = Rec.gjteamData || {};
+  const baseNames = Object.keys(d.bases || {});
+  const v = Rec.gjteam;
+  if (baseNames.length) {
+    // 基地账号强制本基地
+    if (Rec.user.role === 'base' && Rec.user.baseName) {
+      const mine = String(Rec.user.baseName).replace(/基地$/, '');
+      if (baseNames.includes(mine)) v.base = mine;
+    }
+    if (!baseNames.includes(v.base)) {
+      v.base = baseNames.includes('郑州') ? '郑州' : baseNames.find((x) => x !== '(未填基地)') || baseNames[0];
+    }
+    const gjs = ((d.bases[v.base] || {}).gjs) || [];
+    if (!gjs.some((x) => x.name === v.gj)) {
+      v.gj = gjs.length ? gjs[0].name : '';
+      v.panelOpen = false; v.picked = []; v.includeSelf = false;
+    }
+  } else {
+    v.base = ''; v.gj = '';
+  }
+}
+
+function gjteamSaved() {
+  const d = Rec.gjteamData || {};
+  return ((d.selections || {})[Rec.gjteam.base + '|' + Rec.gjteam.gj]) || null;
+}
+
+function gjteamRulesFor(source) {
+  const d = Rec.gjteamData || {};
+  return ((d.nullRules || [])).filter((x) => x.enabled && x.source === source && x.base === Rec.gjteam.base);
+}
+
+function renderGjteam() {
+  const card = $('#gjteamCard');
+  if (!card) return;
+  const v = Rec.gjteam;
+  const d = Rec.gjteamData || {};
+  const bases = d.bases || {};
+  const baseNames = Object.keys(bases);
+  $('#pageSubtitle').textContent = '高经团队业绩 · 双口径数透：销售直推业绩（有数完成度）＋ 接leads业绩（转化跟踪已转化单）；高经业绩 = 手下经理业绩 + 本人在经理层的业绩；归属映射仅管理员可调整';
+
+  if (!baseNames.length) {
+    card.innerHTML = '<div class="card-body"><div class="empty"><h3>暂无数据</h3><p>' + esc(d.demoNote || '有数完成度或转化跟踪底表未上传') + '</p></div></div>';
+    return;
+  }
+
+  const b = bases[v.base] || { gjs: [], mgrs: [], ysNull: { n: 0, amt: 0, gj: {} }, dcNull: { n: 0, amt: 0, gj: {} }, dirty: { n: 0, amt: 0 } };
+  const gjOpts = b.gjs.map((x) => `<option value="${esc(x.name)}" ${x.name === v.gj ? 'selected' : ''}>${esc(x.name)}${x.empId ? ' ' + esc(x.empId) : ''}${x.ambEmp ? '（重名待确认）' : ''}</option>`).join('');
+  const canEdit = !!d.canEdit;
+  const saved = gjteamSaved();
+
+  card.innerHTML = `
+    <div class="card-header" style="display:flex;align-items:center;justify-content:space-between">
+      <div><h3>高经团队业绩（双口径）</h3><p class="records-summary">基地 <b>${esc(v.base)}</b> · 高经 <b>${esc(v.gj || '—')}</b>${saved ? ` · 当前映射 ${saved.mgrs.length} 位经理${saved.includeSelf ? ' + 本人直管' : ''}（${esc(saved.by)} 调整于 ${esc(saved.at)}）` : ' · 尚未核算'}</p></div>
+      <div style="display:flex;gap:8px">
+        <button class="btn btn-sm" id="resetBtn2" type="button">${icon('rotate', 13)} 重置</button>
+        <button class="btn btn-sm" id="exportBtn2" type="button">${icon('download', 13)} 导出</button>
+      </div>
+    </div>
+    <div class="card-body records-toolbar" style="border-bottom:1px solid var(--line)">
+      <div class="field"><label>基地</label>
+        <select class="control" id="gjtBase" style="width:130px">${baseNames.map((x) => `<option value="${esc(x)}" ${x === v.base ? 'selected' : ''}>${esc(x)}</option>`).join('')}</select>
+      </div>
+      <div class="field"><label>高经</label>
+        <select class="control" id="gjtGj" style="width:200px">${gjOpts}</select>
+      </div>
+      ${canEdit ? `<button class="btn btn-sm" id="gjtPick" type="button">选择经理并核算</button>` : ''}
+      <span class="muted" style="font-size:12px">${canEdit ? '选完经理后点「开始核算」，映射自动保存' : '只读视图 · 如需调整归属请联系管理员'}</span>
+    </div>
+    <div id="gjtPanel" style="display:${v.panelOpen ? 'block' : 'none'};border-bottom:1px solid var(--line);background:#f8fafc">
+      <div style="padding:10px 16px;font-size:13px;font-weight:600;border-bottom:1px solid var(--line)">选择经理 — ${esc(v.base)} · 高经 ${esc(v.gj)}（${esc(((b.gjs.find((x) => x.name === v.gj) || {}).empId) || '')}）· 共 ${b.mgrs.length} 位经理</div>
+      <div id="gjtList" style="max-height:380px;overflow:auto"></div>
+      <div style="display:flex;align-items:center;gap:12px;padding:10px 16px;border-top:1px solid var(--line)">
+        <span id="gjtSum" class="muted" style="font-size:12px"></span>
+        <span style="flex:1"></span>
+        <button class="btn btn-sm" id="gjtCancel" type="button" style="background:#fff;color:var(--text)">取消</button>
+        <button class="btn btn-sm" id="gjtGo" type="button">开始核算</button>
+      </div>
+    </div>
+    <div id="gjtResult" style="padding:0"></div>`;
+
+  const bind = (id, ev, fn) => { const el = $(id); if (el) el.addEventListener(ev, fn); };
+  bind('#gjtBase', 'change', (e) => {
+    v.base = e.target.value;
+    const gjs = ((bases[v.base] || {}).gjs) || [];
+    v.gj = gjs.length ? gjs[0].name : '';
+    v.panelOpen = false; v.picked = []; v.includeSelf = false;
+    renderGjteam();
+  });
+  bind('#gjtGj', 'change', (e) => { v.gj = e.target.value; v.panelOpen = false; v.picked = []; v.includeSelf = false; renderGjteam(); });
+  bind('#gjtPick', 'click', () => {
+    const saved = gjteamSaved();
+    v.picked = saved ? [...saved.mgrs] : [];
+    v.includeSelf = saved ? !!saved.includeSelf : false;
+    v.panelOpen = true;
+    const pnl = $('#gjtPanel');
+    if (pnl) pnl.style.display = 'block';
+    renderGjteamPanel();
+  });
+  bind('#resetBtn2', 'click', () => { Rec.gjteam = { base: v.base, gj: '', panelOpen: false, picked: [], includeSelf: false }; renderGjteam(); });
+  bind('#exportBtn2', 'click', exportGjteam);
+
+  if (saved) {
+    api(`/api/gj-team?base=${encodeURIComponent(v.base)}&gj=${encodeURIComponent(v.gj)}`)
+      .then((d2) => { if (d2.calc) renderGjteamResult(d2.calc); })
+      .catch(() => { $('#gjtResult').innerHTML = '<div class="card-body"><div class="empty"><h3>核算结果加载失败</h3></div></div>'; });
+  } else {
+    $('#gjtResult').innerHTML = `<div class="card-body"><div class="empty"><h3>尚未核算</h3><p>${canEdit ? '点上方「选择经理并核算」开始' : '管理员尚未配置该高经的经理归属'}</p></div></div>`;
+  }
+  if (v.panelOpen) renderGjteamPanel();
+}
+
+function renderGjteamPanel() {
+  const v = Rec.gjteam;
+  const d = Rec.gjteamData || {};
+  const b = ((d.bases || {})[v.base]) || { mgrs: [], ysNull: { n: 0, amt: 0 }, dcNull: { n: 0, amt: 0 }, dirty: { n: 0, amt: 0 } };
+  const gj = ((b.gjs || []).find((x) => x.name === v.gj)) || { name: v.gj, empId: '' };
+  const rulesYs = gjteamRulesFor('ys').filter((x) => x.targetName === v.gj);
+  const rulesDc = gjteamRulesFor('dc').filter((x) => x.targetName === v.gj);
+  const fmtN = (n) => Math.round(n).toLocaleString('zh-CN');
+  const numRow = (ys, dc) => `<span style="font-size:12px;color:var(--muted);margin-left:auto;display:flex;gap:16px">
+    <span>直推 <b style="color:var(--text)">${ys.n}</b>行 ¥${fmtN(ys.amt)}</span>
+    <span>接leads <b style="color:var(--text)">${dc.n}</b>单 ¥${fmtN(dc.amt)}</span></span>`;
+  let html = '';
+  // 本人直管行：两源经理列=本人 的实绩（勾选计入合计）
+  const selfStats = gjteamSelfStats(v.base, v.gj);
+  html += `<div class="gjt-row ${v.includeSelf ? 'picked' : ''}" data-k="__self__" style="display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--line);cursor:pointer;background:${v.includeSelf ? '#eff6ff' : 'transparent'}">
+    <input type="checkbox" ${v.includeSelf ? 'checked' : ''} style="width:15px;height:15px">
+    <b>${esc(gj.name)}（本人）</b><span class="num muted" style="font-size:11px">${esc(gj.empId || '')}</span>
+    <span style="font-size:10px;padding:1px 7px;border-radius:99px;background:var(--primary);color:#fff;font-weight:600">高经本人 · 直管</span>
+    ${numRow(selfStats.ys, selfStats.dc)}</div>`;
+  // 经理行
+  b.mgrs.forEach((m) => {
+    const on = v.picked.includes(m.name);
+    html += `<div class="gjt-row ${on ? 'picked' : ''}" data-k="${esc(m.name)}" style="display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--line);cursor:pointer;background:${on ? '#eff6ff' : 'transparent'}">
+    <input type="checkbox" ${on ? 'checked' : ''} style="width:15px;height:15px">
+    <b>${esc(m.name)}</b><span class="num muted" style="font-size:11px">${esc(m.empId || '—')}${m.ambEmp ? '⚠' : ''}</span>
+    ${numRow(m.ys, m.dc)}</div>`;
+  });
+  // null 规则行（命中本高经的）
+  if (rulesYs.length) {
+    html += `<div class="gjt-row rule" data-k="__rule_ys__" style="display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--line);cursor:pointer;background:${v.picked.includes('__rule_ys__') ? '#f0fdf4' : 'transparent'}">
+    <input type="checkbox" ${v.picked.includes('__rule_ys__') ? 'checked' : ''} style="width:15px;height:15px">
+    <b>直管（经理=null）</b><span class="num muted" style="font-size:11px">规则</span>
+    <span style="font-size:10px;padding:1px 7px;border-radius:99px;background:#16a34a;color:#fff;font-weight:600">管理员规则</span>
+    ${numRow({ n: b.ysNull.n, amt: b.ysNull.amt }, { n: 0, amt: 0 })}<span class="muted" style="font-size:11px">规则：${esc(v.base)} null → ${esc(rulesYs[0].targetName)}</span></div>`;
+  }
+  if (rulesDc.length) {
+    html += `<div class="gjt-row rule" data-k="__rule_dc__" style="display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--line);cursor:pointer;background:${v.picked.includes('__rule_dc__') ? '#f0fdf4' : 'transparent'}">
+    <input type="checkbox" ${v.picked.includes('__rule_dc__') ? 'checked' : ''} style="width:15px;height:15px">
+    <b>直管（经理=null）</b><span class="num muted" style="font-size:11px">规则</span>
+    <span style="font-size:10px;padding:1px 7px;border-radius:99px;background:#16a34a;color:#fff;font-weight:600">管理员规则</span>
+    ${numRow({ n: 0, amt: 0 }, { n: b.dcNull.n, amt: b.dcNull.amt })}<span class="muted" style="font-size:11px">规则：${esc(v.base)} null → ${esc(rulesDc[0].targetName)}</span></div>`;
+  }
+  // 待指定 / 脏值提示（不可勾选）
+  const hasYsRule = gjteamRulesFor('ys').length > 0;
+  const hasDcRule = gjteamRulesFor('dc').length > 0;
+  if (b.ysNull.n && !hasYsRule) {
+    html += `<div style="display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--line);background:#fffbeb">
+    <span style="font-size:10px;padding:1px 7px;border-radius:99px;background:#fef3c7;color:#b45309;font-weight:600">待指定</span>
+    <span style="font-size:12px;color:#b45309">直推侧经理=null 共 ${b.ysNull.n} 行 ¥${fmtN(b.ysNull.amt)} 尚未指定归属，未计入任何数字（管理员可在后台配置）</span></div>`;
+  }
+  if (b.dcNull.n && !hasDcRule) {
+    html += `<div style="display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--line);background:#fffbeb">
+    <span style="font-size:10px;padding:1px 7px;border-radius:99px;background:#fef3c7;color:#b45309;font-weight:600">待指定</span>
+    <span style="font-size:12px;color:#b45309">接leads侧经理=null 共 ${b.dcNull.n} 单 ¥${fmtN(b.dcNull.amt)} 尚未指定归属，未计入任何数字（管理员可在后台配置）</span></div>`;
+  }
+  if (b.dirty.n) {
+    html += `<div style="display:flex;align-items:center;gap:10px;padding:9px 16px;border-bottom:1px solid var(--line);background:#fffbeb">
+    <span style="font-size:10px;padding:1px 7px;border-radius:99px;background:#fef3c7;color:#b45309;font-weight:600">脏数据</span>
+    <span style="font-size:12px;color:#b45309">经理列为"/"的行 ${b.dirty.n} 行 ¥${fmtN(b.dirty.amt)} 无法归属，请先修数</span></div>`;
+  }
+  $('#gjtList').innerHTML = html;
+  updateGjteamSum();
+  // 事件
+  $$('#gjtList .gjt-row').forEach((row) => {
+    row.addEventListener('click', (e) => {
+      if (e.target.tagName === 'INPUT') { /* 同步触发 */ }
+      const k = row.dataset.k;
+      if (k === '__self__') v.includeSelf = !v.includeSelf;
+      else if (v.picked.includes(k)) v.picked = v.picked.filter((x) => x !== k);
+      else v.picked.push(k);
+      renderGjteamPanel();
+    });
+  });
+  const c = $('#gjtCancel');
+  if (c) c.addEventListener('click', () => { v.panelOpen = false; renderGjteam(); });
+  const go = $('#gjtGo');
+  if (go) go.addEventListener('click', async () => {
+    const mgrs = v.picked.filter((x) => x !== '__rule_ys__' && x !== '__rule_dc__');
+    try {
+      const d2 = await api('/api/gj-team/select', { method: 'POST', body: { base: v.base, gjName: v.gj, mgrs, includeSelf: v.includeSelf } });
+      // 同步本地缓存（下次打开面板读到最新状态），并收起面板
+      if (Rec.gjteamData && d2.calc) {
+        Rec.gjteamData.selections[v.base + '|' + v.gj] = d2.calc.selection
+          ? { base: v.base, gjName: v.gj, mgrs: d2.calc.selection.mgrs, includeSelf: !!d2.calc.selection.includeSelf, at: d2.calc.selection.at, by: d2.calc.selection.by }
+          : { base: v.base, gjName: v.gj, mgrs, includeSelf: v.includeSelf, at: '', by: Rec.user.name };
+      }
+      v.panelOpen = false;
+      // 整卡重渲染：摘要行更新 + 结果区按最新映射重取核算
+      renderGjteam();
+      toast('已保存归属映射并核算完成', 'ok');
+    } catch (err) { toast(err.message, 'err'); }
+  });
+}
+
+function updateGjteamSum() {
+  const v = Rec.gjteam;
+  const d = Rec.gjteamData || {};
+  const b = ((d.bases || {})[v.base]) || { mgrs: [], ysNull: { n: 0, amt: 0 }, dcNull: { n: 0, amt: 0 } };
+  const fmtN = (n) => '¥' + Math.round(n).toLocaleString('zh-CN');
+  let ys = { n: 0, amt: 0 }, dc = { n: 0, amt: 0 };
+  const add = (x) => { ys.n += x.n; ys.amt += x.amt; };
+  const addD = (x) => { dc.n += x.n; dc.amt += x.amt; };
+  if (v.includeSelf) { const s = gjteamSelfStats(v.base, v.gj); add(s.ys); addD(s.dc); }
+  b.mgrs.forEach((m) => { if (v.picked.includes(m.name)) { add(m.ys); addD(m.dc); } });
+  if (v.picked.includes('__rule_ys__')) add({ n: b.ysNull.n, amt: b.ysNull.amt });
+  if (v.picked.includes('__rule_dc__')) addD({ n: b.dcNull.n, amt: b.dcNull.amt });
+  const nPeople = v.picked.filter((x) => !x.startsWith('__')).length + (v.includeSelf ? 1 : 0);
+  const el = $('#gjtSum');
+  if (el) el.innerHTML = `已选 <b>${nPeople}</b> 项 · 预计：直推 <b>${fmtN(ys.amt)}</b>（${ys.n} 行）· 接leads <b>${fmtN(dc.amt)}</b>（${dc.n} 单）`;
+}
+
+/** 高经本人在经理层的实绩（两源经理列=本人；未缓存时异步拉取核算数据） */
+function gjteamSelfStats(base, gjName) {
+  const calcKey = '_gjSelf_' + base + '|' + gjName;
+  if (Rec.gjteamData && Rec.gjteamData[calcKey]) return Rec.gjteamData[calcKey];
+  api(`/api/gj-team?base=${encodeURIComponent(base)}&gj=${encodeURIComponent(gjName)}`)
+    .then((d2) => {
+      if (d2.calc && Rec.gjteamData) {
+        Rec.gjteamData[calcKey] = d2.calc.self || { ys: { n: 0, amt: 0 }, dc: { n: 0, amt: 0 } };
+        if (Rec.gjteam.panelOpen) renderGjteamPanel();
+      }
+    })
+    .catch(() => { /* 静默，本人行显示 0 */ });
+  return { ys: { n: 0, amt: 0 }, dc: { n: 0, amt: 0 } };
+}
+
+function renderGjteamResult(calc) {
+  const box = $('#gjtResult');
+  if (!box || !calc) return;
+  const fmtN = (n) => '¥' + Math.round(n).toLocaleString('zh-CN');
+  const fmtM = (n) => fmtMoney(n);
+  const statCard = (label, value, foot, tone) => `
+    <div style="flex:1;min-width:150px;padding:12px 14px;border:1px solid var(--line);border-radius:10px;background:var(--surface);border-top:3px solid ${tone || 'var(--line)'}">
+      <div style="font-size:12px;color:var(--muted)">${esc(label)}</div>
+      <div style="font-size:22px;font-weight:700;margin-top:2px">${esc(String(value))}</div>
+      <div style="font-size:11px;color:var(--muted);margin-top:2px">${esc(foot || '')}</div>
+    </div>`;
+  const rows = calc.rows || [];
+  const sumMgr = calc.mgrSub || { ys: { amt: 0 }, dc: { amt: 0 } };
+  const allAmt = (calc.total.ys.amt || 0) + (calc.total.dc.amt || 0);
+  const tableRows = rows.map((r) => {
+    const tot = (r.ys.amt || 0) + (r.dc.amt || 0);
+    const pct = allAmt ? (tot / allAmt * 100).toFixed(1) + '%' : '—';
+    return `<tr style="${r.self ? 'background:#eff6ff' : (r.rule ? 'background:#f0fdf4' : '')}">
+      <td>${esc(r.name)}${r.self ? ' <span style="font-size:10px;padding:1px 6px;border-radius:99px;background:var(--primary);color:#fff;font-weight:600">本人</span>' : ''}${r.rule ? ' <span style="font-size:10px;padding:1px 6px;border-radius:99px;background:#16a34a;color:#fff;font-weight:600">规则</span>' : ''}</td>
+      <td class="num muted">${esc(r.empId || '—')}</td>
+      <td class="num">${r.ys.n}</td>
+      <td class="num nowrap">${fmtM(r.ys.amt)}</td>
+      <td class="num">${r.dc.n}</td>
+      <td class="num nowrap">${fmtM(r.dc.amt)}</td>
+      <td class="num nowrap"><b>${fmtM(tot)}</b></td>
+      <td class="num muted">${pct}</td>
+    </tr>`;
+  }).join('');
+  box.innerHTML = `
+    <div style="display:flex;gap:12px;padding:14px 16px;flex-wrap:wrap">
+      ${statCard('团队直推业绩', fmtN(calc.total.ys.amt), calc.total.ys.n + ' 行 · 有数完成度口径', 'var(--primary)')}
+      ${statCard('团队接leads业绩', fmtN(calc.total.dc.amt), calc.total.dc.n + ' 单 · 转化跟踪已转化口径', '#16a34a')}
+      ${statCard('本人在经理层业绩', fmtN((calc.self.ys.amt || 0) + (calc.self.dc.amt || 0)), '直推 ' + fmtN(calc.self.ys.amt || 0) + ' · leads ' + fmtN(calc.self.dc.amt || 0) + ((calc.self.dcSales || []).length ? '（' + esc(calc.self.dcSales.join('/')) + '）' : ''))}
+      ${statCard('经理业绩小计（' + (calc.rows ? calc.rows.filter((r) => !r.self && !r.rule).length : 0) + ' 人）', fmtN(sumMgr.ys.amt + sumMgr.dc.amt), '直推 ' + fmtN(sumMgr.ys.amt) + ' · leads ' + fmtN(sumMgr.dc.amt), '#94a3b8')}
+    </div>
+    <div style="padding:0 0 14px">
+      <table class="table">
+        <thead><tr><th>经理</th><th>工号</th><th class="num">直推行数</th><th class="num">直推业绩</th><th class="num">leads单数</th><th class="num">接leads业绩</th><th class="num">小计</th><th class="num">占比</th></tr></thead>
+        <tbody>${tableRows || '<tr><td colspan="8"><div class="empty"><h3>无勾选项</h3></div></td></tr>'}</tbody>
+      </table>
+      <div class="table-footer"><span>合计 直推 ${calc.total.ys.n} 行 ${fmtM(calc.total.ys.amt)} · 接leads ${calc.total.dc.n} 单 ${fmtM(calc.total.dc.amt)} · 两口径各自闭环互不混加</span></div>
+      <div style="margin:10px 16px;padding:9px 13px;border:1px dashed #c7d2fe;border-radius:10px;font-size:12px;color:#3730a3;background:#eef2ff">
+        <b>核算口径</b>：${esc(calc.gjName)} 团队直推业绩 = 手下经理直推合计 + 本人直管直推；接leads同理。归属映射调整时间 ${esc((calc.selection || {}).at || '—')}（${esc((calc.selection || {}).by || '—')}）· 仅管理员可调整
+      </div>
+    </div>`;
+}
+
+function exportGjteam() {
+  const d = Rec.gjteamData || {};
+  const saved = gjteamSaved();
+  if (!saved) { toast('尚未核算，无可导出数据', 'info'); return; }
+  api(`/api/gj-team?base=${encodeURIComponent(Rec.gjteam.base)}&gj=${encodeURIComponent(Rec.gjteam.gj)}`)
+    .then((d2) => {
+      const rows = (d2.calc && d2.calc.rows) || [];
+      downloadCsv(`高经团队业绩_${Rec.gjteam.base}_${Rec.gjteam.gj}.csv`, rows, [
+        { label: '经理', value: (r) => r.name },
+        { label: '工号', value: (r) => r.empId },
+        { label: '直推行数', value: (r) => r.ys.n },
+        { label: '直推业绩', value: (r) => r.ys.amt },
+        { label: 'leads单数', value: (r) => r.dc.n },
+        { label: '接leads业绩', value: (r) => r.dc.amt }
+      ]);
+      toast(`已导出 ${rows.length} 行`, 'ok');
+    })
+    .catch((err) => toast(err.message, 'err'));
 }
 
 recordsBoot();

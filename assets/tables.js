@@ -161,7 +161,7 @@ function renderSheet() {
     tr.addEventListener('click', () => {
       const p = new URLSearchParams({ dataset: Tabs.dataset });
       if (tr.dataset.base) p.set('base', tr.dataset.base);
-      location.href = `records.html?${p.toString()}`;
+      location.href = `/records?${p.toString()}`;
     });
   });
 }
